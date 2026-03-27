@@ -1,4 +1,4 @@
-package net.hwyz.iov.cloud.tsp.vagw.config;
+package net.hwyz.iov.cloud.edd.vagw.config;
 
 import cn.hutool.core.util.RandomUtil;
 import jakarta.annotation.PostConstruct;

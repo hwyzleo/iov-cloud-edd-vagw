@@ -1,4 +1,4 @@
-package net.hwyz.iov.cloud.tsp.vagw.config;
+package net.hwyz.iov.cloud.edd.vagw.config;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

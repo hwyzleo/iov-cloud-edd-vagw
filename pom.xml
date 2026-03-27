@@ -11,8 +11,8 @@
         <version>0.0.1-SNAPSHOT</version>
     </parent>
 
-    <groupId>net.hwyz.iov.cloud.tsp</groupId>
-    <artifactId>vehicle-access-gateway</artifactId>
+    <groupId>net.hwyz.iov.cloud.edd</groupId>
+    <artifactId>vagw</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <description>车辆接入网关</description>
     <name>vehicle-access-gateway</name>
