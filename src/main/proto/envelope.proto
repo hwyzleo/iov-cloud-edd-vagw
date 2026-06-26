@@ -1,0 +1,30 @@
+syntax = "proto3";
+package iov.vagw.v1;
+
+option java_package = "net.hwyz.iov.cloud.edd.vagw.proto";
+option java_outer_classname = "EnvelopeProto";
+
+message Envelope {
+  uint32      ver         = 1;
+  string      msg_id      = 2;
+  string      vin         = 3;
+  string      service     = 4;
+  MsgType     msg_type    = 5;
+  int64       ts          = 6;
+  uint64      seq         = 7;
+  uint32      ttl_ms      = 8;
+  Compression compression = 9;
+  bytes       payload     = 15;
+}
+
+enum MsgType {
+  MSG_TYPE_UNSPECIFIED = 0;
+  UP_DATA = 1;
+  DOWN_CMD = 2;
+  UP_ACK = 3;
+}
+
+enum Compression {
+  COMPRESSION_NONE = 0;
+  GZIP = 1;
+}
