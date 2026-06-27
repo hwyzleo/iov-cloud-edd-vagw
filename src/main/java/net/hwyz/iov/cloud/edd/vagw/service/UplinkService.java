@@ -8,6 +8,7 @@ import net.hwyz.iov.cloud.edd.vagw.proto.EnvelopeProto;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.Optional;
 
 @Slf4j
 @Service
@@ -16,8 +17,15 @@ public class UplinkService {
 
     private final RouteService routeService;
     private final UplinkKafkaProducer kafkaProducer;
+    private final BindingService bindingService;
 
-    public ProcessResult processUplink(byte[] payload, String connectionVin) {
+    /**
+     * 处理上行消息
+     * @param payload MQTT 消息负载（Envelope 字节）
+     * @param connectionDeviceSn 连接身份 device_sn（来自 topic）
+     * @return 处理结果
+     */
+    public ProcessResult processUplink(byte[] payload, String connectionDeviceSn) {
         EnvelopeProto.Envelope envelope;
         try {
             envelope = EnvelopeProto.Envelope.parseFrom(payload);
@@ -26,16 +34,16 @@ public class UplinkService {
             return ProcessResult.fail(ErrorCode.INVALID_ENVELOPE, "Envelope parse failed");
         }
 
-        String envelopeVin = envelope.getVin();
-        if (envelopeVin == null || envelopeVin.isBlank()) {
-            log.warn("Envelope missing VIN");
-            return ProcessResult.fail(ErrorCode.INVALID_ENVELOPE, "Missing VIN in envelope");
+        String envelopeDeviceSn = envelope.getDeviceSn();
+        if (envelopeDeviceSn == null || envelopeDeviceSn.isBlank()) {
+            log.warn("Envelope missing device_sn");
+            return ProcessResult.fail(ErrorCode.INVALID_ENVELOPE, "Missing device_sn in envelope");
         }
 
-        // Validate VIN matches connection identity
-        if (!envelopeVin.equalsIgnoreCase(connectionVin)) {
-            log.warn("VIN mismatch: envelope={}, connection={}", envelopeVin, connectionVin);
-            return ProcessResult.fail(ErrorCode.VIN_MISMATCH, "VIN does not match connection identity");
+        // Validate device_sn matches connection identity
+        if (!envelopeDeviceSn.equalsIgnoreCase(connectionDeviceSn)) {
+            log.warn("device_sn mismatch: envelope={}, connection={}", envelopeDeviceSn, connectionDeviceSn);
+            return ProcessResult.fail(ErrorCode.IDENTITY_MISMATCH, "device_sn does not match connection identity");
         }
 
         String service = envelope.getService();
@@ -51,24 +59,29 @@ public class UplinkService {
             return ProcessResult.fail(ErrorCode.ROUTE_UNAVAILABLE, "No route for service: " + service);
         }
 
+        // Resolve VIN for northbound enrichment
+        Optional<String> vinOpt = bindingService.resolveVin(envelopeDeviceSn);
+        String vin = vinOpt.orElse(null);
+
         // Determine Kafka topic (append .ack for UP_ACK messages)
         String kafkaTopic = topic;
         if (envelope.getMsgType() == EnvelopeProto.MsgType.UP_ACK) {
             kafkaTopic = topic + ".ack";
         }
 
-        // Send to Kafka
+        // Send to Kafka with device_sn as key (for ordering)
+        // VIN is included in headers for northbound consumers
         String receivedAt = Instant.now().toString();
-        kafkaProducer.send(kafkaTopic, envelopeVin, payload, service,
+        kafkaProducer.send(kafkaTopic, envelopeDeviceSn, vin, payload, service,
                 envelope.getMsgType().name(), receivedAt, null);
 
-        log.info("Uplink routed: vin={}, service={}, msgType={}, topic={}",
-                envelopeVin, service, envelope.getMsgType(), kafkaTopic);
+        log.info("Uplink routed: deviceSn={}, vin={}, service={}, msgType={}, topic={}",
+                envelopeDeviceSn, vin, service, envelope.getMsgType(), kafkaTopic);
 
         return ProcessResult.success();
     }
 
-    public record ProcessResult(boolean success, ErrorCode errorCode, String reason) {
+    public record ProcessResult(boolean ok, ErrorCode errorCode, String reason) {
         public static ProcessResult success() {
             return new ProcessResult(true, null, null);
         }
