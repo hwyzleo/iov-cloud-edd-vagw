@@ -28,18 +28,18 @@ class MqttAuthControllerTest {
     @Test
     void authenticate_allowed_shouldReturnAllowWithAcl() {
         MqttAuthRequest request = new MqttAuthRequest();
-        request.setUsername("VIN001");
+        request.setUsername("DEVICE-SN-001");
         request.setClientId("client001");
 
         List<MqttAuthResponse.AclRule> acl = List.of(
                 MqttAuthResponse.AclRule.builder()
                         .permission("allow")
                         .action("publish")
-                        .topic("vehicle/VIN001/#")
+                        .topic("vehicle/DEVICE-SN-001/#")
                         .build()
         );
-        when(authAclService.authenticate("VIN001", "client001"))
-                .thenReturn(AuthAclService.AuthResult.allow(acl));
+        when(authAclService.authenticate("DEVICE-SN-001", "client001"))
+                .thenReturn(AuthAclService.AuthResult.allow(acl, "DEVICE-SN-001", "VIN001"));
 
         ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
 
@@ -57,13 +57,13 @@ class MqttAuthControllerTest {
         request.setClientId("client001");
 
         when(authAclService.authenticate("INVALID", "client001"))
-                .thenReturn(AuthAclService.AuthResult.deny(ErrorCode.DEVICE_UNKNOWN, "Invalid VIN"));
+                .thenReturn(AuthAclService.AuthResult.deny(ErrorCode.DEVICE_UNKNOWN, "Invalid device_sn"));
 
         ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
 
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
         assertEquals("deny", response.getBody().getResult());
-        assertTrue(response.getBody().getReason().contains("Invalid VIN"));
+        assertTrue(response.getBody().getReason().contains("Invalid device_sn"));
     }
 }

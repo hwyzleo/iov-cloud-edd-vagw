@@ -19,10 +19,11 @@ public class MqttAuthController {
 
     @PostMapping("/mqtt/auth")
     public ResponseEntity<MqttAuthResponse> authenticate(@RequestBody MqttAuthRequest request) {
-        log.info("MQTT auth request: username={}, clientId={}", request.getUsername(), request.getClientId());
+        // username = CN(device_sn), clientid = device_sn
+        String deviceSn = request.getUsername();
+        log.info("MQTT auth request: deviceSn={}, clientId={}", deviceSn, request.getClientId());
 
-        String vin = request.getUsername();
-        AuthAclService.AuthResult result = authAclService.authenticate(vin, request.getClientId());
+        AuthAclService.AuthResult result = authAclService.authenticate(deviceSn, request.getClientId());
 
         if (result.allowed()) {
             MqttAuthResponse response = MqttAuthResponse.builder()
@@ -30,12 +31,14 @@ public class MqttAuthController {
                     .isSuperuser(false)
                     .acl(result.acl())
                     .build();
+            log.info("Auth allowed: deviceSn={}, vin={}", result.deviceSn(), result.vin());
             return ResponseEntity.ok(response);
         } else {
             MqttAuthResponse response = MqttAuthResponse.builder()
                     .result("deny")
                     .reason(result.errorCode().getCode() + ": " + result.errorCode().getMessage())
                     .build();
+            log.warn("Auth denied: deviceSn={}, reason={}", deviceSn, result.reason());
             return ResponseEntity.ok(response);
         }
     }

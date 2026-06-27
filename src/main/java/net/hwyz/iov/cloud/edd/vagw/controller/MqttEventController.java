@@ -18,20 +18,21 @@ public class MqttEventController {
 
     @PostMapping("/mqtt/events")
     public ResponseEntity<Void> handleEvent(@RequestBody MqttEventRequest request) {
-        String vin = request.getUsername();
+        // username = device_sn
+        String deviceSn = request.getUsername();
         String event = request.getEvent();
 
-        log.info("MQTT event: event={}, vin={}, clientId={}", event, vin, request.getClientId());
+        log.info("MQTT event: event={}, deviceSn={}, clientId={}", event, deviceSn, request.getClientId());
 
-        if (vin == null || vin.isBlank()) {
-            log.warn("Received event with blank VIN, ignoring");
+        if (deviceSn == null || deviceSn.isBlank()) {
+            log.warn("Received event with blank device_sn, ignoring");
             return ResponseEntity.ok().build();
         }
 
         switch (event) {
             case "client.connected" -> sessionService.onConnected(
-                    vin, request.getClientId(), request.getPeerHost(), request.getProtoVer());
-            case "client.disconnected" -> sessionService.onDisconnected(vin);
+                    deviceSn, request.getClientId(), request.getPeerHost(), request.getProtoVer());
+            case "client.disconnected" -> sessionService.onDisconnected(deviceSn);
             default -> log.warn("Unknown MQTT event: {}", event);
         }
 

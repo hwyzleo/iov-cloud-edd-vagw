@@ -25,29 +25,29 @@ class MqttEventControllerTest {
     void handleEvent_connected_shouldCallSessionService() {
         MqttEventRequest request = new MqttEventRequest();
         request.setEvent("client.connected");
-        request.setUsername("VIN001");
+        request.setUsername("DEVICE-SN-001");
         request.setClientId("client001");
 
         ResponseEntity<Void> response = controller.handleEvent(request);
 
         assertEquals(200, response.getStatusCode().value());
-        verify(sessionService).onConnected("VIN001", "client001", null, null);
+        verify(sessionService).onConnected("DEVICE-SN-001", "client001", null, null);
     }
 
     @Test
     void handleEvent_disconnected_shouldCallSessionService() {
         MqttEventRequest request = new MqttEventRequest();
         request.setEvent("client.disconnected");
-        request.setUsername("VIN001");
+        request.setUsername("DEVICE-SN-001");
 
         ResponseEntity<Void> response = controller.handleEvent(request);
 
         assertEquals(200, response.getStatusCode().value());
-        verify(sessionService).onDisconnected("VIN001");
+        verify(sessionService).onDisconnected("DEVICE-SN-001");
     }
 
     @Test
-    void handleEvent_blankVin_shouldIgnore() {
+    void handleEvent_blankDeviceSn_shouldIgnore() {
         MqttEventRequest request = new MqttEventRequest();
         request.setEvent("client.connected");
         request.setUsername("");

@@ -6,7 +6,7 @@ import lombok.Data;
 @Data
 public class MqttAuthRequest {
     @JsonProperty("username")
-    private String username;  // = CN(VIN)
+    private String username;  // = CN(device_sn)
 
     @JsonProperty("clientid")
     private String clientId;
