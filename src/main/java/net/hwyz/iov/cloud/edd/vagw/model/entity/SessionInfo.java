@@ -15,7 +15,8 @@ import java.time.Instant;
 public class SessionInfo implements Serializable {
     private static final long serialVersionUID = 1L;
 
-    private String vin;
+    private String deviceSn;  // Primary key (changed from vin)
+    private String vin;       // Resolved from binding (enriched for northbound)
     private String clientId;
     private boolean online;
     private Instant connectedAt;
