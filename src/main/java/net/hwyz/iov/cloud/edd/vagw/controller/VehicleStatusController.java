@@ -14,7 +14,7 @@ public class VehicleStatusController {
 
     @GetMapping("/v1/vehicles/{vin}/status")
     public ResponseEntity<VehicleStatusResponse> getStatus(@PathVariable String vin) {
-        return sessionService.getSession(vin.toUpperCase())
+        return sessionService.getSessionByVin(vin.toUpperCase())
                 .map(session -> ResponseEntity.ok(VehicleStatusResponse.builder()
                         .online(session.isOnline())
                         .lastOnlineAt(session.getConnectedAt() != null ? session.getConnectedAt().toString() : null)
