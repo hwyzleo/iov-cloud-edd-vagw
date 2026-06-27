@@ -87,24 +87,24 @@ public class MqttClientManager {
 
     private void handleMessage(String topic, MqttMessage message) {
         try {
-            // Extract VIN from topic: vehicle/{VIN}/up/{service}
+            // Extract device_sn from topic: vehicle/{device_sn}/up/{service}
             String[] parts = topic.split("/");
             if (parts.length < 4 || !"vehicle".equals(parts[0]) || !"up".equals(parts[2])) {
                 log.warn("Invalid uplink topic format: {}", topic);
                 return;
             }
 
-            String vin = parts[1];
+            String deviceSn = parts[1];
             String service = parts[3];
 
-            log.debug("Uplink message: topic={}, vin={}, service={}, payloadSize={}",
-                    topic, vin, service, message.getPayload().length);
+            log.debug("Uplink message: topic={}, deviceSn={}, service={}, payloadSize={}",
+                    topic, deviceSn, service, message.getPayload().length);
 
             UplinkService.ProcessResult result = uplinkService.processUplink(
-                    message.getPayload(), vin);
+                    message.getPayload(), deviceSn);
 
-            if (!result.success()) {
-                log.warn("Uplink processing failed: vin={}, reason={}", vin, result.reason());
+            if (!result.ok()) {
+                log.warn("Uplink processing failed: deviceSn={}, reason={}", deviceSn, result.reason());
             }
         } catch (Exception e) {
             log.error("Error handling MQTT message: topic={}", topic, e);
