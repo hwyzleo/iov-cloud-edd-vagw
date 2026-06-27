@@ -7,7 +7,7 @@ option java_outer_classname = "EnvelopeProto";
 message Envelope {
   uint32      ver         = 1;
   string      msg_id      = 2;
-  string      vin         = 3;
+  string      device_sn   = 3;
   string      service     = 4;
   MsgType     msg_type    = 5;
   int64       ts          = 6;
