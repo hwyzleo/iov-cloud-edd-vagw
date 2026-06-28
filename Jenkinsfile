@@ -12,7 +12,9 @@ pipeline {
                 script {
                     sh '''
                         echo '============================== 构建镜像 =============================='
-                        docker build -t ${IMAGE_NAME} -f ../Dockerfile .
+                        cp /var/jenkins_home/settings.xml ./settings.xml
+                        cp ../apache-maven-3.6.3-bin.tar.gz .
+                        docker build --network appnet -t ${IMAGE_NAME} -f ../Dockerfile .
                     '''
                 }
             }
