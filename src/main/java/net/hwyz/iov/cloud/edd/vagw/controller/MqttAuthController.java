@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class MqttAuthController {
 
-    private static final String VAGW_CLIENT_ID_PREFIX = "vagw-";
+    private static final String VAGW_CLIENT_ID_PREFIX = "vehicle-access-gateway";
 
     private final AuthAclService authAclService;
 

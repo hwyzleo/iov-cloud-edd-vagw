@@ -1,6 +1,5 @@
 package net.hwyz.iov.cloud.edd.vagw.mqtt;
 
-import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -8,6 +7,8 @@ import net.hwyz.iov.cloud.edd.vagw.service.UplinkService;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 @Slf4j
@@ -18,7 +19,7 @@ public class MqttClientManager {
     @Value("${spring.mqtt.url:tcp://localhost:1883}")
     private String brokerUrl;
 
-    @Value("${spring.mqtt.client.id:vagw-}")
+    @Value("${spring.mqtt.client.id:vehicle-access-gateway}")
     private String clientId;
 
     @Value("${spring.mqtt.username:}")
@@ -32,8 +33,10 @@ public class MqttClientManager {
     private MqttClient mqttClient;
     private volatile boolean running = false;
 
-    @PostConstruct
+    @EventListener(ApplicationReadyEvent.class)
     public void init() {
+        // 延迟连接，等HTTP服务完全启动后再连接MQTT
+        log.info("Application ready, starting MQTT client...");
         try {
             connect();
         } catch (Exception e) {
