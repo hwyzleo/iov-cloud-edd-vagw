@@ -10,6 +10,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Collections;
+
 @Slf4j
 @RestController
 @RequiredArgsConstructor
@@ -29,6 +31,7 @@ public class MqttAuthController {
             MqttAuthResponse response = MqttAuthResponse.builder()
                     .result("allow")
                     .isSuperuser(true)
+                    .acl(Collections.emptyList())
                     .build();
             return ResponseEntity.ok(response);
         }
