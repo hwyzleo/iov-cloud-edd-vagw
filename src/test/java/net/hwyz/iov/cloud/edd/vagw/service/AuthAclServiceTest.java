@@ -1,11 +1,9 @@
 package net.hwyz.iov.cloud.edd.vagw.service;
 
-import net.hwyz.iov.cloud.edd.vagw.client.TspDeviceAdmissionClient;
-import net.hwyz.iov.cloud.edd.vagw.model.dto.DeviceAdmissionRequest;
-import net.hwyz.iov.cloud.edd.vagw.model.dto.DeviceAdmissionResult;
-import net.hwyz.iov.cloud.edd.vagw.model.enums.AdmissionDecision;
-import net.hwyz.iov.cloud.edd.vagw.model.enums.AdmissionReason;
 import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
+import net.hwyz.iov.cloud.iov.tsp.api.service.TspDeviceAdmissionService;
+import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionCheckVo;
+import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionResultVo;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -20,18 +18,18 @@ import static org.mockito.Mockito.*;
 class AuthAclServiceTest {
 
     @Mock
-    private TspDeviceAdmissionClient tspDeviceAdmissionClient;
+    private TspDeviceAdmissionService tspDeviceAdmissionService;
 
     @InjectMocks
     private AuthAclServiceImpl authAclService;
 
     @Test
     void authenticate_validDeviceSnWithBinding_shouldAllow() {
-        DeviceAdmissionResult result = DeviceAdmissionResult.builder()
-                .decision(AdmissionDecision.ALLOW)
+        DeviceAdmissionResultVo result = DeviceAdmissionResultVo.builder()
+                .admission("ALLOW")
                 .vin("LSGJA52U7YA000001")
                 .build();
-        when(tspDeviceAdmissionClient.decide(any(DeviceAdmissionRequest.class))).thenReturn(result);
+        when(tspDeviceAdmissionService.checkDeviceAdmission(any(DeviceAdmissionCheckVo.class))).thenReturn(result);
 
         var authResult = authAclService.authenticate("DEVICE001", "client001", "cert-serial-001");
         assertTrue(authResult.allowed());
@@ -44,11 +42,11 @@ class AuthAclServiceTest {
 
     @Test
     void authenticate_validDeviceSnWithoutBinding_shouldDeny() {
-        DeviceAdmissionResult result = DeviceAdmissionResult.builder()
-                .decision(AdmissionDecision.DENY)
-                .reason(AdmissionReason.UNBOUND)
+        DeviceAdmissionResultVo result = DeviceAdmissionResultVo.builder()
+                .admission("DENY")
+                .reason("UNBOUND")
                 .build();
-        when(tspDeviceAdmissionClient.decide(any(DeviceAdmissionRequest.class))).thenReturn(result);
+        when(tspDeviceAdmissionService.checkDeviceAdmission(any(DeviceAdmissionCheckVo.class))).thenReturn(result);
 
         var authResult = authAclService.authenticate("DEVICE001", "client001", "cert-serial-001");
         assertFalse(authResult.allowed());
@@ -77,11 +75,11 @@ class AuthAclServiceTest {
 
     @Test
     void authenticate_lowercaseDeviceSn_shouldNormalize() {
-        DeviceAdmissionResult result = DeviceAdmissionResult.builder()
-                .decision(AdmissionDecision.ALLOW)
+        DeviceAdmissionResultVo result = DeviceAdmissionResultVo.builder()
+                .admission("ALLOW")
                 .vin("LSGJA52U7YA000001")
                 .build();
-        when(tspDeviceAdmissionClient.decide(any(DeviceAdmissionRequest.class))).thenReturn(result);
+        when(tspDeviceAdmissionService.checkDeviceAdmission(any(DeviceAdmissionCheckVo.class))).thenReturn(result);
 
         var authResult = authAclService.authenticate("device001", "client001", "cert-serial-001");
         assertTrue(authResult.allowed());
@@ -90,7 +88,7 @@ class AuthAclServiceTest {
 
     @Test
     void authenticate_tspServiceError_shouldDenyWithDependencyUnavailable() {
-        when(tspDeviceAdmissionClient.decide(any(DeviceAdmissionRequest.class)))
+        when(tspDeviceAdmissionService.checkDeviceAdmission(any(DeviceAdmissionCheckVo.class)))
                 .thenThrow(new RuntimeException("Service unavailable"));
 
         var authResult = authAclService.authenticate("DEVICE001", "client001", "cert-serial-001");
@@ -100,11 +98,11 @@ class AuthAclServiceTest {
 
     @Test
     void authenticate_certRevoked_shouldDenyWithDeviceBlocked() {
-        DeviceAdmissionResult result = DeviceAdmissionResult.builder()
-                .decision(AdmissionDecision.DENY)
-                .reason(AdmissionReason.CERT_REVOKED)
+        DeviceAdmissionResultVo result = DeviceAdmissionResultVo.builder()
+                .admission("DENY")
+                .reason("CERT_REVOKED")
                 .build();
-        when(tspDeviceAdmissionClient.decide(any(DeviceAdmissionRequest.class))).thenReturn(result);
+        when(tspDeviceAdmissionService.checkDeviceAdmission(any(DeviceAdmissionCheckVo.class))).thenReturn(result);
 
         var authResult = authAclService.authenticate("DEVICE001", "client001", "cert-serial-001");
         assertFalse(authResult.allowed());
