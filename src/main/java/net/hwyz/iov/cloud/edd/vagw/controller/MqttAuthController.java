@@ -21,9 +21,13 @@ public class MqttAuthController {
     public ResponseEntity<MqttAuthResponse> authenticate(@RequestBody MqttAuthRequest request) {
         // username = CN(device_sn), clientid = device_sn
         String deviceSn = request.getUsername();
-        log.info("MQTT auth request: deviceSn={}, clientId={}", deviceSn, request.getClientId());
+        String certSerial = request.getPeerCertSerial();
 
-        AuthAclService.AuthResult result = authAclService.authenticate(deviceSn, request.getClientId(), null);
+        log.info("MQTT auth request: deviceSn={}, clientId={}, certSerial={}",
+                deviceSn, request.getClientId(), certSerial);
+
+        AuthAclService.AuthResult result = authAclService.authenticate(
+                deviceSn, request.getClientId(), certSerial);
 
         if (result.allowed()) {
             MqttAuthResponse response = MqttAuthResponse.builder()
@@ -36,7 +40,7 @@ public class MqttAuthController {
         } else {
             MqttAuthResponse response = MqttAuthResponse.builder()
                     .result("deny")
-                    .reason(result.reason())
+                    .reason(result.errorCode().getCode() + ": " + result.errorCode().getMessage())
                     .build();
             log.warn("Auth denied: deviceSn={}, reason={}", deviceSn, result.reason());
             return ResponseEntity.ok(response);

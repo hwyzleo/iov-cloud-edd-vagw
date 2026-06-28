@@ -30,6 +30,7 @@ class MqttAuthControllerTest {
         MqttAuthRequest request = new MqttAuthRequest();
         request.setUsername("DEVICE-SN-001");
         request.setClientId("client001");
+        request.setPeerCertSerial("CERT-SERIAL-001");
 
         List<MqttAuthResponse.AclRule> acl = List.of(
                 MqttAuthResponse.AclRule.builder()
@@ -38,7 +39,7 @@ class MqttAuthControllerTest {
                         .topic("vehicle/DEVICE-SN-001/#")
                         .build()
         );
-        when(authAclService.authenticate("DEVICE-SN-001", "client001", null))
+        when(authAclService.authenticate("DEVICE-SN-001", "client001", "CERT-SERIAL-001"))
                 .thenReturn(AuthAclService.AuthResult.allow(acl, "DEVICE-SN-001", "VIN001"));
 
         ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
@@ -55,8 +56,9 @@ class MqttAuthControllerTest {
         MqttAuthRequest request = new MqttAuthRequest();
         request.setUsername("INVALID");
         request.setClientId("client001");
+        request.setPeerCertSerial("CERT-SERIAL-001");
 
-        when(authAclService.authenticate("INVALID", "client001", null))
+        when(authAclService.authenticate("INVALID", "client001", "CERT-SERIAL-001"))
                 .thenReturn(AuthAclService.AuthResult.deny(ErrorCode.DEVICE_UNKNOWN, "Invalid device_sn"));
 
         ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
@@ -64,6 +66,6 @@ class MqttAuthControllerTest {
         assertEquals(200, response.getStatusCode().value());
         assertNotNull(response.getBody());
         assertEquals("deny", response.getBody().getResult());
-        assertTrue(response.getBody().getReason().contains("Invalid device_sn"));
+        assertTrue(response.getBody().getReason().contains("804001"));
     }
 }
