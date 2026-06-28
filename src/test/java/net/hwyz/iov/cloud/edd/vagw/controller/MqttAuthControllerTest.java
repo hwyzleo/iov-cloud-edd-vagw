@@ -38,7 +38,7 @@ class MqttAuthControllerTest {
                         .topic("vehicle/DEVICE-SN-001/#")
                         .build()
         );
-        when(authAclService.authenticate("DEVICE-SN-001", "client001"))
+        when(authAclService.authenticate("DEVICE-SN-001", "client001", null))
                 .thenReturn(AuthAclService.AuthResult.allow(acl, "DEVICE-SN-001", "VIN001"));
 
         ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
@@ -56,7 +56,7 @@ class MqttAuthControllerTest {
         request.setUsername("INVALID");
         request.setClientId("client001");
 
-        when(authAclService.authenticate("INVALID", "client001"))
+        when(authAclService.authenticate("INVALID", "client001", null))
                 .thenReturn(AuthAclService.AuthResult.deny(ErrorCode.DEVICE_UNKNOWN, "Invalid device_sn"));
 
         ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);

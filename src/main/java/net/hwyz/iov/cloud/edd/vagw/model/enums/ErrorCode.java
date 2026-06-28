@@ -14,7 +14,8 @@ public enum ErrorCode {
     ROUTE_UNAVAILABLE(804006, "路由目标（Kafka）不可用"),
     VEHICLE_OFFLINE(804007, "下行目标车辆离线"),
     VIN_UNAUTHORIZED(804008, "下行目标 VIN 未知 / 未绑定 / 无权限"),
-    ACL_SYNC_FAILED(804009, "ACL 下发 / 同步失败");
+    ACL_SYNC_FAILED(804009, "ACL 下发 / 同步失败"),
+    DEPENDENCY_UNAVAILABLE(804010, "依赖服务不可用");
 
     private final int code;
     private final String message;
