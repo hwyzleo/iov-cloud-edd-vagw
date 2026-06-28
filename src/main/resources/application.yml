@@ -5,6 +5,11 @@ spring:
   application:
     name: vagw
 
+# TSP Device Admission Service configuration
+tsp:
+  device-admission:
+    url: http://tsp-service:8080
+
 feign:
   client:
     config:

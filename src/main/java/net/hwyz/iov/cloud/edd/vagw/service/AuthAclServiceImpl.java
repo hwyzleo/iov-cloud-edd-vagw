@@ -2,13 +2,11 @@ package net.hwyz.iov.cloud.edd.vagw.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import net.hwyz.iov.cloud.edd.vagw.client.TspDeviceAdmissionClient;
-import net.hwyz.iov.cloud.edd.vagw.model.dto.DeviceAdmissionRequest;
-import net.hwyz.iov.cloud.edd.vagw.model.dto.DeviceAdmissionResult;
 import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttAuthResponse;
-import net.hwyz.iov.cloud.edd.vagw.model.enums.AdmissionDecision;
-import net.hwyz.iov.cloud.edd.vagw.model.enums.AdmissionReason;
 import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
+import net.hwyz.iov.cloud.iov.tsp.api.service.TspDeviceAdmissionService;
+import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionCheckVo;
+import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionResultVo;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -25,8 +23,9 @@ public class AuthAclServiceImpl implements AuthAclService {
 
     private static final Pattern DEVICE_SN_PATTERN = Pattern.compile("^[A-Z0-9\\-]{1,64}$");
     private static final String TOPIC_PREFIX = "vehicle/";
+    private static final String ADMISSION_ALLOW = "ALLOW";
 
-    private final TspDeviceAdmissionClient tspDeviceAdmissionClient;
+    private final TspDeviceAdmissionService tspDeviceAdmissionService;
 
     @Override
     public AuthResult authenticate(String deviceSn, String clientId, String certSerial) {
@@ -41,16 +40,18 @@ public class AuthAclServiceImpl implements AuthAclService {
             return AuthResult.deny(ErrorCode.DEVICE_UNKNOWN, "Invalid device_sn format");
         }
 
-        // 调用TSP设备接入裁决接口
-        DeviceAdmissionRequest request = DeviceAdmissionRequest.builder()
-                .uid(normalizedDeviceSn)
+        // 构建TSP裁决请求
+        DeviceAdmissionCheckVo checkVo = DeviceAdmissionCheckVo.builder()
+                .hsm(normalizedDeviceSn)
                 .certSerial(certSerial)
+                .clientId(clientId)
                 .build();
 
         try {
-            DeviceAdmissionResult result = tspDeviceAdmissionClient.decide(request);
+            // 调用TSP设备接入裁决接口
+            DeviceAdmissionResultVo result = tspDeviceAdmissionService.checkDeviceAdmission(checkVo);
 
-            if (result.getDecision() == AdmissionDecision.ALLOW) {
+            if (ADMISSION_ALLOW.equals(result.getAdmission())) {
                 String vin = result.getVin();
                 log.info("Auth success: deviceSn={}, vin={}", normalizedDeviceSn, vin);
 
@@ -62,12 +63,11 @@ public class AuthAclServiceImpl implements AuthAclService {
                 ErrorCode errorCode = mapReasonToErrorCode(result.getReason());
                 log.warn("Auth denied: deviceSn={}, reason={}, errorCode={}",
                         normalizedDeviceSn, result.getReason(), errorCode);
-                return AuthResult.deny(errorCode, result.getReason().getValue());
+                return AuthResult.deny(errorCode, result.getReason());
             }
         } catch (Exception e) {
-            // Catch-all safety net: Feign exceptions are handled by TspDeviceAdmissionFallbackFactory,
-            // but unexpected runtime exceptions (e.g. NPE) should still fail-closed
-            log.error("Auth failed: unexpected error for deviceSn={}", normalizedDeviceSn, e);
+            // TSP服务不可用时fail-closed
+            log.error("Auth failed: TSP service error for deviceSn={}", normalizedDeviceSn, e);
             return AuthResult.deny(ErrorCode.DEPENDENCY_UNAVAILABLE, "TSP service error");
         }
     }
@@ -75,15 +75,16 @@ public class AuthAclServiceImpl implements AuthAclService {
     /**
      * 映射TSP裁决原因到网关错误码
      */
-    private ErrorCode mapReasonToErrorCode(AdmissionReason reason) {
+    private ErrorCode mapReasonToErrorCode(String reason) {
         if (reason == null) {
             return ErrorCode.DEPENDENCY_UNAVAILABLE;
         }
 
         return switch (reason) {
-            case UID_UNKNOWN, UNBOUND -> ErrorCode.DEVICE_UNKNOWN;
-            case CERT_REVOKED, CERT_EXPIRED, DEVICE_RETIRED, DEVICE_BLOCKED -> ErrorCode.DEVICE_BLOCKED;
-            case DEPENDENCY_UNAVAILABLE -> ErrorCode.DEPENDENCY_UNAVAILABLE;
+            case "UID_UNKNOWN", "UNBOUND" -> ErrorCode.DEVICE_UNKNOWN;
+            case "CERT_REVOKED", "CERT_EXPIRED", "DEVICE_RETIRED", "DEVICE_BLOCKED" -> ErrorCode.DEVICE_BLOCKED;
+            case "DEPENDENCY_UNAVAILABLE" -> ErrorCode.DEPENDENCY_UNAVAILABLE;
+            default -> ErrorCode.DEVICE_BLOCKED;
         };
     }
 

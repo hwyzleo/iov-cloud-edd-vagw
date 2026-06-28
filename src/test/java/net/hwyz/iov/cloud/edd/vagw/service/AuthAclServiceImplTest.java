@@ -1,11 +1,9 @@
 package net.hwyz.iov.cloud.edd.vagw.service;
 
-import net.hwyz.iov.cloud.edd.vagw.client.TspDeviceAdmissionClient;
-import net.hwyz.iov.cloud.edd.vagw.model.dto.DeviceAdmissionResult;
-import net.hwyz.iov.cloud.edd.vagw.model.enums.AdmissionDecision;
-import net.hwyz.iov.cloud.edd.vagw.model.enums.AdmissionReason;
 import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
-import org.junit.jupiter.api.BeforeEach;
+import net.hwyz.iov.cloud.iov.tsp.api.service.TspDeviceAdmissionService;
+import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionCheckVo;
+import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionResultVo;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -23,7 +21,7 @@ import static org.mockito.Mockito.when;
 class AuthAclServiceImplTest {
 
     @Mock
-    private TspDeviceAdmissionClient tspDeviceAdmissionClient;
+    private TspDeviceAdmissionService tspDeviceAdmissionService;
 
     @InjectMocks
     private AuthAclServiceImpl authAclService;
@@ -34,12 +32,12 @@ class AuthAclServiceImplTest {
         String clientId = "DEVICE-001";
         String certSerial = "cert-serial-001";
 
-        DeviceAdmissionResult admissionResult = DeviceAdmissionResult.builder()
-                .decision(AdmissionDecision.ALLOW)
+        DeviceAdmissionResultVo admissionResult = DeviceAdmissionResultVo.builder()
+                .admission("ALLOW")
                 .vin("VIN001")
                 .build();
 
-        when(tspDeviceAdmissionClient.decide(any())).thenReturn(admissionResult);
+        when(tspDeviceAdmissionService.checkDeviceAdmission(any())).thenReturn(admissionResult);
 
         AuthAclService.AuthResult result = authAclService.authenticate(deviceSn, clientId, certSerial);
 
@@ -55,12 +53,12 @@ class AuthAclServiceImplTest {
         String clientId = "DEVICE-001";
         String certSerial = "cert-serial-001";
 
-        DeviceAdmissionResult admissionResult = DeviceAdmissionResult.builder()
-                .decision(AdmissionDecision.DENY)
-                .reason(AdmissionReason.UID_UNKNOWN)
+        DeviceAdmissionResultVo admissionResult = DeviceAdmissionResultVo.builder()
+                .admission("DENY")
+                .reason("UID_UNKNOWN")
                 .build();
 
-        when(tspDeviceAdmissionClient.decide(any())).thenReturn(admissionResult);
+        when(tspDeviceAdmissionService.checkDeviceAdmission(any())).thenReturn(admissionResult);
 
         AuthAclService.AuthResult result = authAclService.authenticate(deviceSn, clientId, certSerial);
 
@@ -74,12 +72,12 @@ class AuthAclServiceImplTest {
         String clientId = "DEVICE-001";
         String certSerial = "cert-serial-001";
 
-        DeviceAdmissionResult admissionResult = DeviceAdmissionResult.builder()
-                .decision(AdmissionDecision.DENY)
-                .reason(AdmissionReason.DEVICE_BLOCKED)
+        DeviceAdmissionResultVo admissionResult = DeviceAdmissionResultVo.builder()
+                .admission("DENY")
+                .reason("DEVICE_BLOCKED")
                 .build();
 
-        when(tspDeviceAdmissionClient.decide(any())).thenReturn(admissionResult);
+        when(tspDeviceAdmissionService.checkDeviceAdmission(any())).thenReturn(admissionResult);
 
         AuthAclService.AuthResult result = authAclService.authenticate(deviceSn, clientId, certSerial);
 
@@ -93,7 +91,7 @@ class AuthAclServiceImplTest {
         String clientId = "DEVICE-001";
         String certSerial = "cert-serial-001";
 
-        when(tspDeviceAdmissionClient.decide(any()))
+        when(tspDeviceAdmissionService.checkDeviceAdmission(any()))
                 .thenThrow(new RuntimeException("TSP service unavailable"));
 
         AuthAclService.AuthResult result = authAclService.authenticate(deviceSn, clientId, certSerial);

@@ -68,6 +68,12 @@
             <artifactId>protobuf-java</artifactId>
             <version>${protobuf.version}</version>
         </dependency>
+        <!-- TSP API: device admission service -->
+        <dependency>
+            <groupId>net.hwyz.iov.cloud.iov</groupId>
+            <artifactId>iov-tsp-api</artifactId>
+            <version>0.0.1-SNAPSHOT</version>
+        </dependency>
         <!-- Test -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
