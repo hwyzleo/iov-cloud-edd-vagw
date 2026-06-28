@@ -11,6 +11,10 @@ import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -28,20 +32,42 @@ public class MqttClientManager {
     @Value("${spring.mqtt.password:}")
     private String password;
 
+    @Value("${spring.mqtt.connect.delay-seconds:5}")
+    private int connectDelaySeconds;
+
     private final UplinkService uplinkService;
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     private MqttClient mqttClient;
     private volatile boolean running = false;
 
     @EventListener(ApplicationReadyEvent.class)
     public void init() {
-        // 延迟连接，等HTTP服务完全启动后再连接MQTT
-        log.info("Application ready, starting MQTT client...");
-        try {
-            connect();
-        } catch (Exception e) {
-            log.error("Failed to initialize MQTT client", e);
+        log.info("Application ready, scheduling MQTT connection in {} seconds...", connectDelaySeconds);
+        scheduler.schedule(this::connectWithRetry, connectDelaySeconds, TimeUnit.SECONDS);
+    }
+
+    private void connectWithRetry() {
+        int maxRetries = 5;
+        int retryDelay = 5;
+
+        for (int i = 0; i < maxRetries; i++) {
+            try {
+                connect();
+                return; // 成功连接，退出
+            } catch (Exception e) {
+                log.warn("MQTT connection attempt {}/{} failed: {}", i + 1, maxRetries, e.getMessage());
+                if (i < maxRetries - 1) {
+                    try {
+                        Thread.sleep(retryDelay * 1000L);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+            }
         }
+        log.error("Failed to connect MQTT after {} attempts", maxRetries);
     }
 
     private void connect() throws MqttException {
@@ -127,6 +153,7 @@ public class MqttClientManager {
     @PreDestroy
     public void shutdown() {
         running = false;
+        scheduler.shutdown();
         if (mqttClient != null && mqttClient.isConnected()) {
             try {
                 mqttClient.disconnect();
