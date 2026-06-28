@@ -25,11 +25,6 @@
     </properties>
 
     <dependencies>
-        <!-- 框架: 异常 -->
-        <dependency>
-            <groupId>net.hwyz.iov.cloud.framework</groupId>
-            <artifactId>framework-exception-starter</artifactId>
-        </dependency>
         <!-- 框架: Kafka -->
         <dependency>
             <groupId>net.hwyz.iov.cloud.framework</groupId>
@@ -81,32 +76,6 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
-
-    <repositories>
-        <repository>
-            <id>maven-snapshots</id>
-            <url>http://nexus-internal.rox-motor.com:8081/repository/maven-snapshots/</url>
-            <releases>
-                <enabled>false</enabled>
-            </releases>
-            <snapshots>
-                <enabled>true</enabled>
-            </snapshots>
-        </repository>
-    </repositories>
-
-    <pluginRepositories>
-        <pluginRepository>
-            <id>maven-snapshots</id>
-            <url>http://nexus-internal.rox-motor.com:8081/repository/maven-snapshots/</url>
-            <releases>
-                <enabled>false</enabled>
-            </releases>
-            <snapshots>
-                <enabled>true</enabled>
-            </snapshots>
-        </pluginRepository>
-    </pluginRepositories>
 
     <build>
         <extensions>

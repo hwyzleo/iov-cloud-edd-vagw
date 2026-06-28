@@ -15,19 +15,33 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class MqttAuthController {
 
+    private static final String VAGW_CLIENT_ID_PREFIX = "vagw-";
+
     private final AuthAclService authAclService;
 
     @PostMapping("/mqtt/auth")
     public ResponseEntity<MqttAuthResponse> authenticate(@RequestBody MqttAuthRequest request) {
-        // username = CN(device_sn), clientid = device_sn
+        String clientId = request.getClientId();
+
+        // VAGW自身连接，直接放行（超级用户权限）
+        if (clientId != null && clientId.startsWith(VAGW_CLIENT_ID_PREFIX)) {
+            log.info("VAGW self connection allowed: clientId={}", clientId);
+            MqttAuthResponse response = MqttAuthResponse.builder()
+                    .result("allow")
+                    .isSuperuser(true)
+                    .build();
+            return ResponseEntity.ok(response);
+        }
+
+        // TBOX设备认证
         String deviceSn = request.getUsername();
         String certSerial = request.getPeerCertSerial();
 
         log.info("MQTT auth request: deviceSn={}, clientId={}, certSerial={}",
-                deviceSn, request.getClientId(), certSerial);
+                deviceSn, clientId, certSerial);
 
         AuthAclService.AuthResult result = authAclService.authenticate(
-                deviceSn, request.getClientId(), certSerial);
+                deviceSn, clientId, certSerial);
 
         if (result.allowed()) {
             MqttAuthResponse response = MqttAuthResponse.builder()
