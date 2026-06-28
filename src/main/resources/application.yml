@@ -2,9 +2,26 @@ server:
   port: 10804
 
 spring:
-  data:
-    redis:
-      host: ${REDIS_HOST:localhost}
-      port: ${REDIS_PORT:6379}
-      password: ${REDIS_PASSWORD:}
-      database: 0
+  application:
+    name: vagw
+
+# TSP Device Admission Service configuration
+tsp:
+  device-admission:
+    url: http://tsp-service:8080
+    connect-timeout: 500
+    read-timeout: 500
+    retry:
+      max-attempts: 2
+      backoff:
+        interval: 100
+
+feign:
+  client:
+    config:
+      tsp-device-admission:
+        connectTimeout: 500
+        readTimeout: 500
+        loggerLevel: full
+  circuitbreaker:
+    enabled: true
