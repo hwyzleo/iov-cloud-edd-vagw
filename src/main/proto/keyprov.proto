@@ -19,3 +19,4 @@ message KeyProvResponse {
   int64  valid_until  = 6;
   bytes  kdf_params   = 7;
 }
+
