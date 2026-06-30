@@ -65,3 +65,4 @@ target/
 !**/src/test/**/target/
 
 docs/superpowers
+graphify-out
