@@ -1,0 +1,21 @@
+syntax = "proto3";
+package iov.vagw.keyprov.v1;
+
+option java_package = "net.hwyz.iov.cloud.edd.vagw.proto";
+option java_outer_classname = "KeyProvProto";
+
+message KeyProvRequest {
+  string biz_domain = 1;
+  string usage      = 2;
+  bytes  ext        = 15;
+}
+
+message KeyProvResponse {
+  uint32 result_code  = 1;
+  bytes  wrapped_key  = 2;
+  string key_id       = 3;
+  uint32 key_version  = 4;
+  string alg          = 5;
+  int64  valid_until  = 6;
+  bytes  kdf_params   = 7;
+}
