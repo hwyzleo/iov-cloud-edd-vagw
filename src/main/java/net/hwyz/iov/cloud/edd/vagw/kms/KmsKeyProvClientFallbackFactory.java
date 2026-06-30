@@ -14,7 +14,7 @@ public class KmsKeyProvClientFallbackFactory implements FallbackFactory<KmsKeyPr
         return new KmsKeyProvClient() {
             @Override
             public KeyProvIssueResult issue(KeyProvIssueRequest request) {
-                log.error("KMS issue fallback triggered for device_sn={}", request.device_sn());
+                log.error("KMS issue fallback triggered for deviceSn={}", request.deviceSn());
                 throw new KmsKeyProvException("KMS service unavailable", cause);
             }
         };
