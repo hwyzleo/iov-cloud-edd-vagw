@@ -101,6 +101,21 @@ class UplinkServiceTest {
     }
 
     @Test
+    void processUplink_keyprov_deviceSnMismatch_shouldFail() {
+        EnvelopeProto.Envelope envelope = EnvelopeProto.Envelope.newBuilder()
+                .setDeviceSn("DEVICE001")
+                .setService("keyprov")
+                .setMsgType(EnvelopeProto.MsgType.UP_DATA)
+                .build();
+
+        UplinkService.ProcessResult result = uplinkService.processUplink(
+                envelope.toByteArray(), "DEVICE002");
+
+        assertFalse(result.ok());
+        assertEquals(ErrorCode.IDENTITY_MISMATCH, result.errorCode());
+    }
+
+    @Test
     void processUplink_invalidPayload_shouldFail() {
         UplinkService.ProcessResult result = uplinkService.processUplink(
                 new byte[]{0x00, 0x01}, "DEVICE001");
