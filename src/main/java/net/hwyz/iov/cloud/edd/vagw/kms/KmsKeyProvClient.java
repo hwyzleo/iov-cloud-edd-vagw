@@ -13,18 +13,18 @@ public interface KmsKeyProvClient {
 
     record KeyProvIssueRequest(
             @JsonProperty("device_sn") String deviceSn,
-            @JsonProperty("cert_serial") String certSerial,
-            @JsonProperty("biz_domain") String bizDomain,
-            @JsonProperty("usage") String usage,
-            @JsonProperty("request_payload") byte[] requestPayload
+            String certSerial,
+            String bizDomain,
+            String usage,
+            byte[] requestPayload
     ) {}
 
     record KeyProvIssueResult(
-            @JsonProperty("wrapped_key") byte[] wrappedKey,
-            @JsonProperty("key_id") String keyId,
-            @JsonProperty("key_version") int keyVersion,
-            @JsonProperty("alg") String alg,
-            @JsonProperty("valid_until") long validUntil,
-            @JsonProperty("kdf_params") byte[] kdfParams
+            byte[] wrappedKey,
+            String keyId,
+            int keyVersion,
+            String alg,
+            long validUntil,
+            byte[] kdfParams
     ) {}
 }
