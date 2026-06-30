@@ -3,8 +3,12 @@ package net.hwyz.iov.cloud.edd.vagw.service;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.hwyz.iov.cloud.edd.vagw.kafka.UplinkKafkaProducer;
+import net.hwyz.iov.cloud.edd.vagw.kms.KmsKeyProvClient;
+import net.hwyz.iov.cloud.edd.vagw.kms.KmsKeyProvException;
 import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
+import net.hwyz.iov.cloud.edd.vagw.mqtt.MqttClientManager;
 import net.hwyz.iov.cloud.edd.vagw.proto.EnvelopeProto;
+import net.hwyz.iov.cloud.edd.vagw.proto.KeyProvProto;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -18,6 +22,8 @@ public class UplinkService {
     private final RouteService routeService;
     private final UplinkKafkaProducer kafkaProducer;
     private final BindingService bindingService;
+    private final KmsKeyProvClient kmsKeyProvClient;
+    private final MqttClientManager mqttClientManager;
 
     /**
      * 处理上行消息
@@ -52,6 +58,11 @@ public class UplinkService {
             return ProcessResult.fail(ErrorCode.INVALID_ENVELOPE, "Missing service in envelope");
         }
 
+        // Handle keyprov specially (synchronous flow, not Kafka)
+        if ("keyprov".equals(service)) {
+            return processKeyProv(envelope, connectionDeviceSn);
+        }
+
         // Check route exists
         String topic = routeService.getTopic(service);
         if (topic == null) {
@@ -79,6 +90,111 @@ public class UplinkService {
                 envelopeDeviceSn, vin, service, envelope.getMsgType(), kafkaTopic);
 
         return ProcessResult.success();
+    }
+
+    /**
+     * Process keyprov uplink message
+     */
+    private ProcessResult processKeyProv(EnvelopeProto.Envelope envelope, String connectionDeviceSn) {
+        // Validate device_sn consistency
+        if (!envelope.getDeviceSn().equalsIgnoreCase(connectionDeviceSn)) {
+            log.warn("Keyprov device_sn mismatch: envelope={}, connection={}", envelope.getDeviceSn(), connectionDeviceSn);
+            return ProcessResult.fail(ErrorCode.IDENTITY_MISMATCH, "device_sn does not match connection identity");
+        }
+
+        // Parse keyprov request payload
+        KeyProvProto.KeyProvRequest keyProvRequest;
+        try {
+            keyProvRequest = KeyProvProto.KeyProvRequest.parseFrom(envelope.getPayload());
+        } catch (Exception e) {
+            log.warn("Failed to parse KeyProvRequest: {}", e.getMessage());
+            return ProcessResult.fail(ErrorCode.PAYLOAD_DECODE_FAILED, "KeyProvRequest parse failed");
+        }
+
+        // Call KMS to get wrapped key
+        KmsKeyProvClient.KeyProvIssueResult issueResult;
+        try {
+            KmsKeyProvClient.KeyProvIssueRequest issueRequest = new KmsKeyProvClient.KeyProvIssueRequest(
+                    envelope.getDeviceSn(),
+                    null, // certSerial - may need to get from connection context
+                    keyProvRequest.getBizDomain(),
+                    keyProvRequest.getUsage(),
+                    envelope.getPayload().toByteArray()
+            );
+            issueResult = kmsKeyProvClient.issue(issueRequest);
+        } catch (KmsKeyProvException e) {
+            log.error("KMS keyprov failed for device_sn={}: {}", envelope.getDeviceSn(), e.getMessage());
+            // Send failure response to vehicle
+            sendKeyProvFailureResponse(envelope, ErrorCode.DEPENDENCY_UNAVAILABLE);
+            return ProcessResult.fail(ErrorCode.DEPENDENCY_UNAVAILABLE, "KMS keyprov failed");
+        }
+
+        // Build keyprov response
+        KeyProvProto.KeyProvResponse keyProvResponse = KeyProvProto.KeyProvResponse.newBuilder()
+                .setResultCode(0)
+                .setWrappedKey(com.google.protobuf.ByteString.copyFrom(issueResult.wrappedKey()))
+                .setKeyId(issueResult.keyId())
+                .setKeyVersion(issueResult.keyVersion())
+                .setAlg(issueResult.alg())
+                .setValidUntil(issueResult.validUntil())
+                .setKdfParams(com.google.protobuf.ByteString.copyFrom(issueResult.kdfParams()))
+                .build();
+
+        // Build downlink envelope
+        EnvelopeProto.Envelope downlinkEnvelope = EnvelopeProto.Envelope.newBuilder()
+                .setVer(envelope.getVer())
+                .setMsgId(envelope.getMsgId())
+                .setDeviceSn(envelope.getDeviceSn())
+                .setService("keyprov")
+                .setMsgType(EnvelopeProto.MsgType.DOWN_CMD)
+                .setTs(Instant.now().toEpochMilli())
+                .setSeq(envelope.getSeq())
+                .setTtlMs(envelope.getTtlMs())
+                .setCompression(EnvelopeProto.Compression.COMPRESSION_NONE)
+                .setPayload(com.google.protobuf.ByteString.copyFrom(keyProvResponse.toByteArray()))
+                .build();
+
+        // Publish down/keyprov message
+        String downTopic = "vehicle/" + envelope.getDeviceSn() + "/down/keyprov";
+        try {
+            mqttClientManager.publish(downTopic, downlinkEnvelope.toByteArray(), 1);
+            log.info("Keyprov response published: deviceSn={}, topic={}", envelope.getDeviceSn(), downTopic);
+        } catch (Exception e) {
+            log.error("Failed to publish keyprov response: deviceSn={}", envelope.getDeviceSn(), e);
+            return ProcessResult.fail(ErrorCode.ROUTE_UNAVAILABLE, "Failed to publish keyprov response");
+        }
+
+        return ProcessResult.success();
+    }
+
+    /**
+     * Send keyprov failure response to vehicle
+     */
+    private void sendKeyProvFailureResponse(EnvelopeProto.Envelope envelope, ErrorCode errorCode) {
+        KeyProvProto.KeyProvResponse failureResponse = KeyProvProto.KeyProvResponse.newBuilder()
+                .setResultCode(errorCode.getCode())
+                .build();
+
+        EnvelopeProto.Envelope failureEnvelope = EnvelopeProto.Envelope.newBuilder()
+                .setVer(envelope.getVer())
+                .setMsgId(envelope.getMsgId())
+                .setDeviceSn(envelope.getDeviceSn())
+                .setService("keyprov")
+                .setMsgType(EnvelopeProto.MsgType.DOWN_CMD)
+                .setTs(Instant.now().toEpochMilli())
+                .setSeq(envelope.getSeq())
+                .setTtlMs(envelope.getTtlMs())
+                .setCompression(EnvelopeProto.Compression.COMPRESSION_NONE)
+                .setPayload(com.google.protobuf.ByteString.copyFrom(failureResponse.toByteArray()))
+                .build();
+
+        String downTopic = "vehicle/" + envelope.getDeviceSn() + "/down/keyprov";
+        try {
+            mqttClientManager.publish(downTopic, failureEnvelope.toByteArray(), 1);
+            log.info("Keyprov failure response published: deviceSn={}, errorCode={}", envelope.getDeviceSn(), errorCode);
+        } catch (Exception e) {
+            log.error("Failed to publish keyprov failure response: deviceSn={}", envelope.getDeviceSn(), e);
+        }
     }
 
     public record ProcessResult(boolean ok, ErrorCode errorCode, String reason) {
