@@ -9,6 +9,7 @@ import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
 import net.hwyz.iov.cloud.edd.vagw.mqtt.MqttClientManager;
 import net.hwyz.iov.cloud.edd.vagw.proto.EnvelopeProto;
 import net.hwyz.iov.cloud.edd.vagw.proto.KeyProvProto;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -23,6 +24,7 @@ public class UplinkService {
     private final UplinkKafkaProducer kafkaProducer;
     private final BindingService bindingService;
     private final KmsKeyProvClient kmsKeyProvClient;
+    @Lazy
     private final MqttClientManager mqttClientManager;
 
     /**
