@@ -14,7 +14,8 @@ public class RouteService {
     private final Map<String, String> routeTable = new ConcurrentHashMap<>(
             Map.of(
                     "remotecontrol", "iov.vagw.up.remotecontrol",
-                    "remotecontrol_ack", "iov.vagw.up.remotecontrol.ack"
+                    "remotecontrol_ack", "iov.vagw.up.remotecontrol.ack",
+                    "keyprov", "iov.vagw.up.keyprov"
             )
     );
 
