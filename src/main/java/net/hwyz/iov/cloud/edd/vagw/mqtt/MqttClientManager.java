@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.hwyz.iov.cloud.edd.vagw.service.UplinkService;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Lazy;
@@ -36,8 +37,9 @@ public class MqttClientManager {
     @Value("${spring.mqtt.connect.delay-seconds:5}")
     private int connectDelaySeconds;
 
+    @Autowired
     @Lazy
-    private final UplinkService uplinkService;
+    private UplinkService uplinkService;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     private MqttClient mqttClient;

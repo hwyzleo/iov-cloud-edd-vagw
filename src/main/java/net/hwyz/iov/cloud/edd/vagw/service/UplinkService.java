@@ -9,6 +9,7 @@ import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
 import net.hwyz.iov.cloud.edd.vagw.mqtt.MqttClientManager;
 import net.hwyz.iov.cloud.edd.vagw.proto.EnvelopeProto;
 import net.hwyz.iov.cloud.edd.vagw.proto.KeyProvProto;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
@@ -24,8 +25,9 @@ public class UplinkService {
     private final UplinkKafkaProducer kafkaProducer;
     private final BindingService bindingService;
     private final KmsKeyProvClient kmsKeyProvClient;
+    @Autowired
     @Lazy
-    private final MqttClientManager mqttClientManager;
+    private MqttClientManager mqttClientManager;
 
     /**
      * 处理上行消息
