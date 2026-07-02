@@ -41,7 +41,7 @@ pipeline {
                             docker rm ${PROJECT_NAME}
                         fi
                         docker pull ${IMAGE_NAME}
-                        docker run -d --name ${PROJECT_NAME} -e JAVA_OPTS="-XX:-UseContainerSupport" ${IMAGE_NAME}
+                        docker run -d --name ${PROJECT_NAME} --network appnet -e JAVA_OPTS="-XX:-UseContainerSupport" ${IMAGE_NAME}
                         sleep 10
                         docker logs ${PROJECT_NAME}
                     '''
