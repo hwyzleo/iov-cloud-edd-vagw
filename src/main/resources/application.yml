@@ -1,6 +1,3 @@
-server:
-  port: 10804
-
 spring:
   application:
     name: vagw
