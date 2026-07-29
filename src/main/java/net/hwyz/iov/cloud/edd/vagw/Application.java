@@ -21,6 +21,6 @@ public class Application {
 
     public static void main(String[] args) {
         SpringApplication.run(Application.class, args);
-        log.info("VAGW started on port {}", System.getProperty("server.port", "10804"));
+        log.info("VAGW started on port {}", System.getProperty("server.port"));
     }
 }
