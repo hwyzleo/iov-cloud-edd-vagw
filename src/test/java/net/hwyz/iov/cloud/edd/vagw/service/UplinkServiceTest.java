@@ -8,11 +8,13 @@ import net.hwyz.iov.cloud.edd.vagw.mqtt.MqttClientManager;
 import net.hwyz.iov.cloud.edd.vagw.proto.EnvelopeProto;
 import net.hwyz.iov.cloud.edd.vagw.proto.KeyProvProto;
 import org.eclipse.paho.client.mqttv3.MqttException;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
 
@@ -36,10 +38,20 @@ class UplinkServiceTest {
     private KmsKeyProvClient kmsKeyProvClient;
 
     @Mock
+    private FotaBridgeAppService fotaBridgeAppService;
+
+    @Mock
     private MqttClientManager mqttClientManager;
 
     @InjectMocks
     private UplinkService uplinkService;
+
+    @BeforeEach
+    void setUp() {
+        // UplinkService 通过 @Autowired @Lazy 注入 MqttClientManager（非构造参数）；
+        // @InjectMocks 使用构造注入会跳过该字段注入，需显式补注入（修复 CR-004 遗留测试注入问题）。
+        ReflectionTestUtils.setField(uplinkService, "mqttClientManager", mqttClientManager);
+    }
 
     @Test
     void processUplink_validEnvelopeUpAck_shouldRouteToAckTopic() {
@@ -113,6 +125,52 @@ class UplinkServiceTest {
 
         assertFalse(result.ok());
         assertEquals(ErrorCode.IDENTITY_MISMATCH, result.errorCode());
+    }
+
+    @Test
+    void processUplink_fota_shouldDelegateToBridge() {
+        EnvelopeProto.Envelope envelope = EnvelopeProto.Envelope.newBuilder()
+                .setVer(1)
+                .setMsgId("msg-fota-001")
+                .setDeviceSn("DEVICE001")
+                .setService("fota")
+                .setMsgType(EnvelopeProto.MsgType.UP_DATA)
+                .setTs(System.currentTimeMillis())
+                .setPayload(com.google.protobuf.ByteString.copyFrom(new byte[]{1, 2, 3}))
+                .build();
+
+        when(fotaBridgeAppService.processFotaUplink(any(), eq("DEVICE001")))
+                .thenReturn(FotaBridgeAppService.FotaUplinkResult.success());
+
+        UplinkService.ProcessResult result = uplinkService.processUplink(
+                envelope.toByteArray(), "DEVICE001");
+
+        assertTrue(result.ok());
+        verify(fotaBridgeAppService).processFotaUplink(any(), eq("DEVICE001"));
+        verifyNoInteractions(kafkaProducer);
+    }
+
+    @Test
+    void processUplink_fota_rejected_shouldMapResult() {
+        EnvelopeProto.Envelope envelope = EnvelopeProto.Envelope.newBuilder()
+                .setVer(1)
+                .setMsgId("msg-fota-002")
+                .setDeviceSn("DEVICE001")
+                .setService("fota")
+                .setMsgType(EnvelopeProto.MsgType.UP_DATA)
+                .setTs(System.currentTimeMillis())
+                .setPayload(com.google.protobuf.ByteString.copyFrom(new byte[]{1, 2, 3}))
+                .build();
+
+        when(fotaBridgeAppService.processFotaUplink(any(), eq("DEVICE001")))
+                .thenReturn(FotaBridgeAppService.FotaUplinkResult.fail(
+                        ErrorCode.VIN_UNAUTHORIZED, "VIN not bound"));
+
+        UplinkService.ProcessResult result = uplinkService.processUplink(
+                envelope.toByteArray(), "DEVICE001");
+
+        assertFalse(result.ok());
+        assertEquals(ErrorCode.VIN_UNAUTHORIZED, result.errorCode());
     }
 
     @Test

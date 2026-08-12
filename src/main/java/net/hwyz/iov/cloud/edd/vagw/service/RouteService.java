@@ -15,7 +15,8 @@ public class RouteService {
             Map.of(
                     "remotecontrol", "iov.vagw.up.remotecontrol",
                     "remotecontrol_ack", "iov.vagw.up.remotecontrol.ack",
-                    "keyprov", "iov.vagw.up.keyprov"
+                    "keyprov", "iov.vagw.up.keyprov",
+                    "fota", FotaRouteConfig.KAFKA_UP_TOPIC
             )
     );
 

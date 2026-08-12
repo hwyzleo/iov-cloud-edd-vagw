@@ -14,7 +14,13 @@ message Envelope {
   uint64      seq         = 7;
   uint32      ttl_ms      = 8;
   Compression compression = 9;
-  bytes       payload     = 15;
+  string      correlation_id = 10;
+  string      causation_id   = 11;
+  string      trace_id       = 12;
+  string      idempotency_key = 13;
+  bytes       payload_digest = 14;
+  bytes       payload     = 15; // 业务负载；FOTA 为 OTA 契约 bytes（对 VAGW 不透明）
+  string      vin         = 16; // VIN：北向富化 / 下行 Kafka Key 一致性校验
 }
 
 enum MsgType {

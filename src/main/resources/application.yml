@@ -2,6 +2,13 @@ spring:
   application:
     name: vagw
 
+# FOTA bridge configuration (EDD-VAGW-DSN-CR-005)
+# Topic 固定：iov.vagw.up.fota / iov.vagw.down.fota / .dlq（见 FotaRouteConfig），消费组 edd-vagw-fota-downlink
+vagw:
+  kafka:
+    fota:
+      downlink-concurrency: 3
+
 # TSP Device Admission Service configuration
 tsp:
   device-admission:

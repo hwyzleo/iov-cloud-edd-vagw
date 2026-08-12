@@ -25,6 +25,7 @@ public class UplinkService {
     private final UplinkKafkaProducer kafkaProducer;
     private final BindingService bindingService;
     private final KmsKeyProvClient kmsKeyProvClient;
+    private final FotaBridgeAppService fotaBridgeAppService;
     @Autowired
     @Lazy
     private MqttClientManager mqttClientManager;
@@ -65,6 +66,15 @@ public class UplinkService {
         // Handle keyprov specially (synchronous flow, not Kafka)
         if ("keyprov".equals(service)) {
             return processKeyProv(envelope, connectionDeviceSn);
+        }
+
+        // Handle fota (MQTT↔Kafka bridge, DSN-CR-005)
+        if (FotaRouteConfig.SERVICE.equals(service)) {
+            FotaBridgeAppService.FotaUplinkResult result =
+                    fotaBridgeAppService.processFotaUplink(envelope, connectionDeviceSn);
+            return result.ok()
+                    ? ProcessResult.success()
+                    : ProcessResult.fail(result.errorCode(), result.reason());
         }
 
         // Check route exists
