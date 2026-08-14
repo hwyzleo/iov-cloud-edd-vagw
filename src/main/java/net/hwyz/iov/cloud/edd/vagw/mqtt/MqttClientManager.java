@@ -3,7 +3,7 @@ package net.hwyz.iov.cloud.edd.vagw.mqtt;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import net.hwyz.iov.cloud.edd.vagw.service.UplinkService;
+import net.hwyz.iov.cloud.edd.vagw.adapter.mqtt.VehicleMessageUplinkBridge;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,7 +39,7 @@ public class MqttClientManager {
 
     @Autowired
     @Lazy
-    private UplinkService uplinkService;
+    private VehicleMessageUplinkBridge uplinkBridge;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     private MqttClient mqttClient;
@@ -120,25 +120,21 @@ public class MqttClientManager {
 
     private void handleMessage(String topic, MqttMessage message) {
         try {
-            // Extract device_sn from topic: vehicle/{device_sn}/up/{service}
+            // Extract device key from topic: vehicle/{device-key}/up/{service}
             String[] parts = topic.split("/");
             if (parts.length < 4 || !"vehicle".equals(parts[0]) || !"up".equals(parts[2])) {
                 log.warn("Invalid uplink topic format: {}", topic);
                 return;
             }
 
-            String deviceSn = parts[1];
+            String deviceKey = parts[1];
             String service = parts[3];
 
-            log.debug("Uplink message: topic={}, deviceSn={}, service={}, payloadSize={}",
-                    topic, deviceSn, service, message.getPayload().length);
+            log.debug("Uplink message: topic={}, deviceKey={}, service={}, payloadSize={}",
+                    topic, deviceKey, service, message.getPayload().length);
 
-            UplinkService.ProcessResult result = uplinkService.processUplink(
-                    message.getPayload(), deviceSn);
-
-            if (!result.ok()) {
-                log.warn("Uplink processing failed: deviceSn={}, reason={}", deviceSn, result.reason());
-            }
+            // allowlist（EDD-VAGW-DSN-CR-006 §10）：仅 fota 上行可桥接，其余拒绝，不形成任意隧道
+            uplinkBridge.handleUplink(topic, message.getPayload());
         } catch (Exception e) {
             log.error("Error handling MQTT message: topic={}", topic, e);
         }

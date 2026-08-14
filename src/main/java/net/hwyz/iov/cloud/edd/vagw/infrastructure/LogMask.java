@@ -34,4 +34,16 @@ public final class LogMask {
         }
         return value.replace(sensitive, mask(sensitive));
     }
+
+    /**
+     * PayloadType 摘要（EDD-VAGW-DSN-CR-006 §10）：仅输出消息名摘要，不输出完整类型路径。
+     * 如 vehicle.fota.v1.TaskCheckRequest → TaskCheckRequest。
+     */
+    public static String maskPayloadType(String payloadType) {
+        if (payloadType == null || payloadType.isBlank()) {
+            return "";
+        }
+        int idx = payloadType.lastIndexOf('.');
+        return idx >= 0 ? payloadType.substring(idx + 1) : payloadType;
+    }
 }

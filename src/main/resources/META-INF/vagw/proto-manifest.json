@@ -1,0 +1,14 @@
+{
+  "parProtoRelease": "0.0.1-SNAPSHOT",
+  "protocolMajor": 1,
+  "common": {
+    "coordinates": "net.hwyz.iov.cloud.proto:proto-vehicle-common:0.0.1-SNAPSHOT",
+    "descriptorSha256": "4ba4c1470270b16a44f30ce3bfff2062a703c0c88ac56bf89925a810651bc200",
+    "payloadTypeRegistrySha256": "3be5b15de9d9dc1a4f5649f84dc36b877e3e6c2d818c9bcd9e900715dea3c89d"
+  },
+  "protoVagw": {
+    "coordinates": "net.hwyz.iov.cloud.proto:proto-vagw:0.0.1-SNAPSHOT",
+    "protoSha256": "d954d4661bf9d284a367eb01117550154368c5c91e90466158d82b43724b76db",
+    "descriptorSha256": "556e3a3d3916e65ce03e392440911d5d01ae899d61777cd8a7b8e84679c913d7"
+  }
+}

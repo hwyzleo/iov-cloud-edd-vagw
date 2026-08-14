@@ -1,0 +1,395 @@
+package net.hwyz.iov.cloud.edd.vagw.application;
+
+import net.hwyz.iov.cloud.edd.vagw.adapter.mqtt.VehicleMessageDownlinkPublisher;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.idempotency.VehicleBridgeInbox;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.kafka.EnvelopeDlqPublisher;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.kafka.EnvelopeKafkaProducer;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.route.VehicleRouteCatalog;
+import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
+import net.hwyz.iov.cloud.edd.vagw.service.BindingService;
+import net.hwyz.iov.cloud.edd.vagw.service.SessionService;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
+import vehicle.common.v1.Envelope;
+
+import java.util.Optional;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+/**
+ * 透明桥接编排服务测试（EDD-VAGW-DSN-CR-006 §6/§7/§9）。
+ */
+@ExtendWith(MockitoExtension.class)
+class VehicleMessageBridgeServiceTest {
+
+    @Mock
+    private AccessIdentityValidator accessIdentityValidator;
+    @Mock
+    private VehicleEnvelopeValidator envelopeValidator;
+    @Mock
+    private BindingService bindingService;
+    @Mock
+    private SessionService sessionService;
+    @Mock
+    private VehicleBridgeInbox bridgeInbox;
+    @Mock
+    private EnvelopeKafkaProducer kafkaProducer;
+    @Mock
+    private EnvelopeDlqPublisher dlqPublisher;
+    @Mock
+    private VehicleMessageDownlinkPublisher downlinkPublisher;
+    @Mock
+    private GatewayDeliveryService gatewayDeliveryService;
+
+    @InjectMocks
+    private VehicleMessageBridgeService bridgeService;
+
+    @BeforeEach
+    void setUp() {
+        ReflectionTestUtils.setField(bridgeService, "uplinkProduceRetries", 3);
+        ReflectionTestUtils.setField(bridgeService, "uplinkProduceRetryDelayMs", 0L);
+    }
+
+    // ---------- helpers ----------
+
+    private Envelope.VehicleMessageEnvelope.Builder uplinkBase() {
+        return Envelope.VehicleMessageEnvelope.newBuilder()
+                .setRequestId("req-1")
+                .setTimestampMs(System.currentTimeMillis())
+                .setProtocolVersion("fota-v1")
+                .setDeviceId("DEVICE001")
+                .setVin("VIN-A")
+                .setMessageId("msg-up-001")
+                .setPayloadType("vehicle.fota.v1.TaskCheckRequest")
+                .setMessageKind(Envelope.MessageKind.MESSAGE_KIND_REQUEST)
+                .setService("vehicle.fota")
+                .setPayload(com.google.protobuf.ByteString.copyFrom(new byte[]{1, 2, 3}));
+    }
+
+    private ConsumerRecord<String, byte[]> record(String vin, byte[] value) {
+        return new ConsumerRecord<>(VehicleRouteCatalog.KAFKA_DOWN_TOPIC, 0, 10L, vin, value);
+    }
+
+    private Envelope.VehicleMessageEnvelope.Builder downlinkBase(String messageId) {
+        return Envelope.VehicleMessageEnvelope.newBuilder()
+                .setRequestId("req-dn")
+                .setTimestampMs(System.currentTimeMillis())
+                .setProtocolVersion("fota-v1")
+                .setDeviceId("DEVICE001")
+                .setVin("VIN-A")
+                .setMessageId(messageId)
+                .setPayloadType("vehicle.fota.v1.TaskCheckResponse")
+                .setMessageKind(Envelope.MessageKind.MESSAGE_KIND_RESPONSE)
+                .setService("vehicle.fota")
+                .setPayload(com.google.protobuf.ByteString.copyFrom(new byte[]{9, 9, 9}));
+    }
+
+    // ---------- 上行 ----------
+
+    @Test
+    void processUplink_success_shouldBridgeSameBytes() throws Exception {
+        Envelope.VehicleMessageEnvelope e = uplinkBase().build();
+        byte[] bytes = e.toByteArray();
+        when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
+        when(accessIdentityValidator.validate(eq("DEVICE001"), eq("DEVICE001"))).thenReturn(null);
+        when(bindingService.resolveVin("DEVICE001")).thenReturn(Optional.of("VIN-A"));
+        when(bridgeInbox.findFinal(VehicleBridgeInbox.Direction.UPLINK, "msg-up-001"))
+                .thenReturn(Optional.empty());
+        when(kafkaProducer.sendUplink(any(), any(), any(), any(), any()))
+                .thenReturn(new EnvelopeKafkaProducer.SendResult(0, 5));
+
+        VehicleMessageBridgeService.UplinkResult result =
+                bridgeService.processUplink(bytes, "DEVICE001");
+
+        assertTrue(result.ok());
+        verify(kafkaProducer).sendUplink(eq(VehicleRouteCatalog.KAFKA_UP_TOPIC), eq("VIN-A"),
+                eq(bytes), any(), any());
+        verify(bridgeInbox).recordFinal(argThat(r ->
+                "ACCEPTED".equals(r.getState()) && "msg-up-001".equals(r.getMessageId())));
+    }
+
+    @Test
+    void processUplink_parseFailure_shouldMoveToUpDlq() {
+        byte[] bad = new byte[]{0x00, 0x01, 0x02};
+
+        VehicleMessageBridgeService.UplinkResult result =
+                bridgeService.processUplink(bad, "DEVICE001");
+
+        assertFalse(result.ok());
+        assertEquals(ErrorCode.INVALID_ENVELOPE, result.errorCode());
+        verify(dlqPublisher).publish(eq(VehicleRouteCatalog.UP_DLQ_TOPIC), eq("DEVICE001"),
+                eq(bad), contains("contract_invalid"));
+        verifyNoInteractions(bindingService, kafkaProducer);
+    }
+
+    @Test
+    void processUplink_identityMismatch_shouldMoveToUpDlq() {
+        Envelope.VehicleMessageEnvelope e = uplinkBase().build();
+        when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
+        when(accessIdentityValidator.validate(eq("OTHER"), eq("DEVICE001")))
+                .thenReturn(new AccessIdentityValidator.Failure(
+                        AccessIdentityValidator.Reason.DEVICE_MISMATCH, "identity mismatch"));
+
+        VehicleMessageBridgeService.UplinkResult result =
+                bridgeService.processUplink(e.toByteArray(), "OTHER");
+
+        assertFalse(result.ok());
+        assertEquals(ErrorCode.IDENTITY_MISMATCH, result.errorCode());
+        verify(dlqPublisher).publish(eq(VehicleRouteCatalog.UP_DLQ_TOPIC), eq("OTHER"),
+                any(byte[].class), contains("identity_mismatch"));
+        verifyNoInteractions(bindingService, kafkaProducer);
+    }
+
+    @Test
+    void processUplink_vinUnbound_shouldMoveToUpDlq() {
+        Envelope.VehicleMessageEnvelope e = uplinkBase().build();
+        when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
+        when(accessIdentityValidator.validate(any(), any())).thenReturn(null);
+        when(bindingService.resolveVin("DEVICE001")).thenReturn(Optional.empty());
+
+        VehicleMessageBridgeService.UplinkResult result =
+                bridgeService.processUplink(e.toByteArray(), "DEVICE001");
+
+        assertFalse(result.ok());
+        assertEquals(ErrorCode.VIN_UNAUTHORIZED, result.errorCode());
+        verify(dlqPublisher).publish(eq(VehicleRouteCatalog.UP_DLQ_TOPIC), eq("DEVICE001"),
+                any(byte[].class), contains("vin_unbound"));
+        verifyNoInteractions(kafkaProducer);
+    }
+
+    @Test
+    void processUplink_envelopeVinMismatchBinding_shouldMoveToUpDlq() {
+        Envelope.VehicleMessageEnvelope e = uplinkBase().setVin("VIN-B").build();
+        when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
+        when(accessIdentityValidator.validate(any(), any())).thenReturn(null);
+        when(bindingService.resolveVin("DEVICE001")).thenReturn(Optional.of("VIN-A"));
+
+        VehicleMessageBridgeService.UplinkResult result =
+                bridgeService.processUplink(e.toByteArray(), "DEVICE001");
+
+        assertFalse(result.ok());
+        assertEquals(ErrorCode.IDENTITY_MISMATCH, result.errorCode());
+        verify(dlqPublisher).publish(eq(VehicleRouteCatalog.UP_DLQ_TOPIC), eq("DEVICE001"),
+                any(byte[].class), contains("vin_mismatch_binding"));
+    }
+
+    @Test
+    void processUplink_duplicateSameHash_shouldSkip() {
+        Envelope.VehicleMessageEnvelope e = uplinkBase().build();
+        byte[] bytes = e.toByteArray();
+        when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
+        when(accessIdentityValidator.validate(any(), any())).thenReturn(null);
+        when(bindingService.resolveVin("DEVICE001")).thenReturn(Optional.of("VIN-A"));
+        String digest = VehicleBridgeInbox.digestOf(bytes);
+        when(bridgeInbox.findFinal(VehicleBridgeInbox.Direction.UPLINK, "msg-up-001"))
+                .thenReturn(Optional.of(VehicleBridgeInbox.InboxRecord.builder()
+                        .state("ACCEPTED").envelopeSha256(digest).build()));
+
+        VehicleMessageBridgeService.UplinkResult result =
+                bridgeService.processUplink(bytes, "DEVICE001");
+
+        assertTrue(result.ok());
+        verifyNoInteractions(kafkaProducer);
+    }
+
+    @Test
+    void processUplink_produceFailure_shouldRetryThenMoveToUpDlq() throws Exception {
+        Envelope.VehicleMessageEnvelope e = uplinkBase().build();
+        when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
+        when(accessIdentityValidator.validate(any(), any())).thenReturn(null);
+        when(bindingService.resolveVin("DEVICE001")).thenReturn(Optional.of("VIN-A"));
+        when(bridgeInbox.findFinal(VehicleBridgeInbox.Direction.UPLINK, "msg-up-001"))
+                .thenReturn(Optional.empty());
+        when(kafkaProducer.sendUplink(any(), any(), any(), any(), any()))
+                .thenThrow(new RuntimeException("kafka down"));
+
+        VehicleMessageBridgeService.UplinkResult result =
+                bridgeService.processUplink(e.toByteArray(), "DEVICE001");
+
+        assertFalse(result.ok());
+        assertEquals(ErrorCode.ROUTE_UNAVAILABLE, result.errorCode());
+        verify(kafkaProducer, times(3)).sendUplink(any(), any(), any(), any(), any());
+        verify(dlqPublisher).publish(eq(VehicleRouteCatalog.UP_DLQ_TOPIC), eq("VIN-A"),
+                any(byte[].class), contains("produce_retries_exceeded"));
+        verify(bridgeInbox).recordFinal(argThat(r -> "DLQED".equals(r.getState())));
+    }
+
+    // ---------- 下行 ----------
+
+    @Test
+    void processDownlink_deliverable_shouldPublishSameBytes() throws Exception {
+        String vin = "VIN-A";
+        Envelope.VehicleMessageEnvelope e = downlinkBase("msg-dn-001").build();
+        ConsumerRecord<String, byte[]> rec = record(vin, e.toByteArray());
+
+        when(envelopeValidator.validateDownlink(any(), any(), any())).thenReturn(null);
+        when(bridgeInbox.findFinal(VehicleBridgeInbox.Direction.DOWNLINK, "msg-dn-001"))
+                .thenReturn(Optional.empty());
+        when(bindingService.resolveDeviceSn(vin)).thenReturn(Optional.of("DEVICE001"));
+        when(sessionService.isOnlineByDeviceSn("DEVICE001")).thenReturn(true);
+
+        boolean processed = bridgeService.processDownlink(rec);
+
+        assertTrue(processed);
+        verify(downlinkPublisher).publish(eq("vehicle/DEVICE001/down/fota"), eq(rec.value()));
+        verify(bridgeInbox).recordFinal(argThat(r ->
+                "ACCEPTED".equals(r.getState()) && "OUTCOME_ACCEPTED".equals(r.getOutcome())));
+        verifyNoInteractions(gatewayDeliveryService);
+    }
+
+    @Test
+    void processDownlink_vehicleOffline_shouldProduceRejected() {
+        String vin = "VIN-A";
+        Envelope.VehicleMessageEnvelope e = downlinkBase("msg-dn-002").build();
+        ConsumerRecord<String, byte[]> rec = record(vin, e.toByteArray());
+
+        when(envelopeValidator.validateDownlink(any(), any(), any())).thenReturn(null);
+        when(bridgeInbox.findFinal(VehicleBridgeInbox.Direction.DOWNLINK, "msg-dn-002"))
+                .thenReturn(Optional.empty());
+        when(bindingService.resolveDeviceSn(vin)).thenReturn(Optional.of("DEVICE001"));
+        when(sessionService.isOnlineByDeviceSn("DEVICE001")).thenReturn(false);
+        when(gatewayDeliveryService.produceRejected(eq(e), eq(vin), eq(DeliveryReason.VEHICLE_OFFLINE)))
+                .thenReturn("msg-dn-002");
+
+        boolean processed = bridgeService.processDownlink(rec);
+
+        assertTrue(processed);
+        verify(gatewayDeliveryService).produceRejected(e, vin, DeliveryReason.VEHICLE_OFFLINE);
+        verify(bridgeInbox).recordFinal(argThat(r ->
+                "REJECTED".equals(r.getState()) && "OUTCOME_REJECTED".equals(r.getOutcome())));
+        verifyNoInteractions(downlinkPublisher);
+    }
+
+    @Test
+    void processDownlink_vinUnbound_shouldProduceRejected() {
+        String vin = "VIN-A";
+        Envelope.VehicleMessageEnvelope e = downlinkBase("msg-dn-003").build();
+        ConsumerRecord<String, byte[]> rec = record(vin, e.toByteArray());
+
+        when(envelopeValidator.validateDownlink(any(), any(), any())).thenReturn(null);
+        when(bridgeInbox.findFinal(VehicleBridgeInbox.Direction.DOWNLINK, "msg-dn-003"))
+                .thenReturn(Optional.empty());
+        when(bindingService.resolveDeviceSn(vin)).thenReturn(Optional.empty());
+        when(gatewayDeliveryService.produceRejected(eq(e), eq(vin), eq(DeliveryReason.VIN_UNBOUND)))
+                .thenReturn("msg-dn-003");
+
+        boolean processed = bridgeService.processDownlink(rec);
+
+        assertTrue(processed);
+        verify(gatewayDeliveryService).produceRejected(e, vin, DeliveryReason.VIN_UNBOUND);
+    }
+
+    @Test
+    void processDownlink_expired_shouldProduceMessageExpired() {
+        String vin = "VIN-A";
+        Envelope.VehicleMessageEnvelope e = downlinkBase("msg-dn-004").build();
+        ConsumerRecord<String, byte[]> rec = record(vin, e.toByteArray());
+
+        when(envelopeValidator.validateDownlink(any(), any(), any()))
+                .thenReturn(new VehicleEnvelopeValidator.Failure(
+                        VehicleEnvelopeValidator.Reason.MESSAGE_EXPIRED, "expired"));
+        when(gatewayDeliveryService.produceRejected(eq(e), eq(vin), eq(DeliveryReason.MESSAGE_EXPIRED)))
+                .thenReturn("msg-dn-004");
+
+        boolean processed = bridgeService.processDownlink(rec);
+
+        assertTrue(processed);
+        verify(gatewayDeliveryService).produceRejected(e, vin, DeliveryReason.MESSAGE_EXPIRED);
+        verifyNoInteractions(bindingService, downlinkPublisher);
+    }
+
+    @Test
+    void processDownlink_contractInvalid_shouldMoveToDownDlq() {
+        ConsumerRecord<String, byte[]> rec = record("VIN-A", new byte[]{0x00, 0x01});
+        boolean processed = bridgeService.processDownlink(rec);
+
+        assertTrue(processed);
+        verify(dlqPublisher).publish(eq(VehicleRouteCatalog.DOWN_DLQ_TOPIC), eq("VIN-A"),
+                any(byte[].class), contains("contract_invalid"));
+    }
+
+    @Test
+    void processDownlink_digestConflict_shouldMoveToDownDlq() {
+        String vin = "VIN-A";
+        Envelope.VehicleMessageEnvelope e = downlinkBase("msg-dn-005").build();
+        ConsumerRecord<String, byte[]> rec = record(vin, e.toByteArray());
+
+        when(envelopeValidator.validateDownlink(any(), any(), any())).thenReturn(null);
+        when(bridgeInbox.findFinal(VehicleBridgeInbox.Direction.DOWNLINK, "msg-dn-005"))
+                .thenReturn(Optional.of(VehicleBridgeInbox.InboxRecord.builder()
+                        .state("ACCEPTED").envelopeSha256("different-digest").build()));
+
+        boolean processed = bridgeService.processDownlink(rec);
+
+        assertTrue(processed);
+        verify(dlqPublisher).publish(eq(VehicleRouteCatalog.DOWN_DLQ_TOPIC), eq(vin),
+                any(byte[].class), contains("digest_conflict"));
+    }
+
+    @Test
+    void processDownlink_duplicate_shouldSkip() {
+        String vin = "VIN-A";
+        Envelope.VehicleMessageEnvelope e = downlinkBase("msg-dn-006").build();
+        ConsumerRecord<String, byte[]> rec = record(vin, e.toByteArray());
+        String digest = VehicleBridgeInbox.digestOf(rec.value());
+
+        when(envelopeValidator.validateDownlink(any(), any(), any())).thenReturn(null);
+        when(bridgeInbox.findFinal(VehicleBridgeInbox.Direction.DOWNLINK, "msg-dn-006"))
+                .thenReturn(Optional.of(VehicleBridgeInbox.InboxRecord.builder()
+                        .state("ACCEPTED").envelopeSha256(digest).build()));
+
+        boolean processed = bridgeService.processDownlink(rec);
+
+        assertTrue(processed);
+        verifyNoInteractions(bindingService, sessionService, downlinkPublisher, gatewayDeliveryService);
+    }
+
+    @Test
+    void processDownlink_mqttPublishFailure_shouldProduceRejected() throws Exception {
+        String vin = "VIN-A";
+        Envelope.VehicleMessageEnvelope e = downlinkBase("msg-dn-007").build();
+        ConsumerRecord<String, byte[]> rec = record(vin, e.toByteArray());
+
+        when(envelopeValidator.validateDownlink(any(), any(), any())).thenReturn(null);
+        when(bridgeInbox.findFinal(VehicleBridgeInbox.Direction.DOWNLINK, "msg-dn-007"))
+                .thenReturn(Optional.empty());
+        when(bindingService.resolveDeviceSn(vin)).thenReturn(Optional.of("DEVICE001"));
+        when(sessionService.isOnlineByDeviceSn("DEVICE001")).thenReturn(true);
+        doThrow(new RuntimeException("mqtt down")).when(downlinkPublisher).publish(anyString(), any());
+        when(gatewayDeliveryService.produceRejected(eq(e), eq(vin), eq(DeliveryReason.MQTT_PUBLISH_FAILED)))
+                .thenReturn("msg-dn-007");
+
+        boolean processed = bridgeService.processDownlink(rec);
+
+        assertTrue(processed);
+        verify(gatewayDeliveryService).produceRejected(e, vin, DeliveryReason.MQTT_PUBLISH_FAILED);
+        verify(bridgeInbox).recordFinal(argThat(r -> "REJECTED".equals(r.getState())));
+    }
+
+    @Test
+    void processDownlink_deliveryProduceFailure_shouldNotCommit() {
+        String vin = "VIN-A";
+        Envelope.VehicleMessageEnvelope e = downlinkBase("msg-dn-008").build();
+        ConsumerRecord<String, byte[]> rec = record(vin, e.toByteArray());
+
+        when(envelopeValidator.validateDownlink(any(), any(), any())).thenReturn(null);
+        when(bridgeInbox.findFinal(VehicleBridgeInbox.Direction.DOWNLINK, "msg-dn-008"))
+                .thenReturn(Optional.empty());
+        when(bindingService.resolveDeviceSn(vin)).thenReturn(Optional.empty());
+        when(gatewayDeliveryService.produceRejected(any(), any(), any()))
+                .thenThrow(new net.hwyz.iov.cloud.edd.vagw.infrastructure.VehicleBridgeException("kafka down"));
+
+        boolean processed = bridgeService.processDownlink(rec);
+
+        assertFalse(processed);
+        verifyNoInteractions(downlinkPublisher);
+    }
+}
