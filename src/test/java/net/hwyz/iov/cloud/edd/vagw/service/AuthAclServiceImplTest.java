@@ -12,7 +12,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
 /**
  * AuthAclServiceImpl单元测试
@@ -22,6 +22,9 @@ class AuthAclServiceImplTest {
 
     @Mock
     private TspDeviceAdmissionService tspDeviceAdmissionService;
+
+    @Mock
+    private BindingService bindingService;
 
     @InjectMocks
     private AuthAclServiceImpl authAclService;
@@ -45,6 +48,8 @@ class AuthAclServiceImplTest {
         assertEquals("VIN001", result.vin());
         assertEquals(deviceSn, result.deviceSn());
         assertNotNull(result.acl());
+        // 准入成功后建立 hsm_uid ↔ VIN 会话绑定（EDD-VAGW-DSN-CR-007 §4.2）
+        verify(bindingService).rememberAdmission("DEVICE-001", "VIN001", null);
     }
 
     @Test

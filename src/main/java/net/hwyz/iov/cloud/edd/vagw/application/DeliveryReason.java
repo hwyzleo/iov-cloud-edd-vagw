@@ -16,6 +16,9 @@ import vagw.v1.Delivery;
 public enum DeliveryReason {
     VEHICLE_OFFLINE(Delivery.Outcome.OUTCOME_REJECTED, true, 300_000L),
     VIN_UNBOUND(Delivery.Outcome.OUTCOME_REJECTED, true, 300_000L),
+    BINDING_CONFLICT(Delivery.Outcome.OUTCOME_REJECTED, false, null),
+    BINDING_DEPENDENCY_UNAVAILABLE(Delivery.Outcome.OUTCOME_REJECTED, true, 30_000L),
+    BINDING_CONTEXT_MISSING(Delivery.Outcome.OUTCOME_REJECTED, true, 30_000L),
     DEVICE_MISMATCH(Delivery.Outcome.OUTCOME_REJECTED, false, null),
     PERMISSION_DENIED(Delivery.Outcome.OUTCOME_REJECTED, false, null),
     MESSAGE_EXPIRED(Delivery.Outcome.OUTCOME_REJECTED, false, null),

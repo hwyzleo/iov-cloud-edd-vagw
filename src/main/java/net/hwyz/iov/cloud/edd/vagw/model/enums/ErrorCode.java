@@ -17,7 +17,10 @@ public enum ErrorCode {
     ACL_SYNC_FAILED(804009, "ACL 下发 / 同步失败"),
     DEPENDENCY_UNAVAILABLE(804010, "依赖服务不可用（TSP / KMS / keyprov）"),
     MESSAGE_EXPIRED(804011, "下行消息过期（TTL 超时）"),
-    MQTT_PUBLISH_FAILED(804012, "MQTT 下行发布失败");
+    MQTT_PUBLISH_FAILED(804012, "MQTT 下行发布失败"),
+    BINDING_CONFLICT(804013, "绑定冲突（同 VIN 多条 ACTIVE TBOX）"),
+    BINDING_DEPENDENCY_UNAVAILABLE(804014, "绑定反查依赖（TSP）不可用"),
+    BINDING_CONTEXT_MISSING(804015, "上行会话/绑定上下文缺失");
 
     private final int code;
     private final String message;

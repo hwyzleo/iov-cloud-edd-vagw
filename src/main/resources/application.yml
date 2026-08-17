@@ -15,6 +15,10 @@ vagw:
     max-payload-bytes: 262016
     uplink-produce-retries: 3
     uplink-produce-retry-delay-ms: 500
+  # 绑定解析配置（EDD-VAGW-DSN-CR-007 §8）：缓存有界 TTL，未命中回源 TSP；
+  # 不做长期负缓存（negative-cache-ttl 恒为 0）
+  binding:
+    cache-ttl-seconds: 300
 
 # TSP Device Admission Service configuration
 tsp:
@@ -25,6 +29,10 @@ feign:
   client:
     config:
       tsp-device-admission:
+        connectTimeout: 500
+        readTimeout: 500
+        loggerLevel: basic
+      tsp-vehicle-access-identity:
         connectTimeout: 500
         readTimeout: 500
         loggerLevel: basic

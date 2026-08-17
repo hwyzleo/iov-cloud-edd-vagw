@@ -20,6 +20,9 @@ class AuthAclServiceTest {
     @Mock
     private TspDeviceAdmissionService tspDeviceAdmissionService;
 
+    @Mock
+    private BindingService bindingService;
+
     @InjectMocks
     private AuthAclServiceImpl authAclService;
 
@@ -38,6 +41,8 @@ class AuthAclServiceTest {
         assertEquals("DEVICE001", authResult.deviceSn());
         assertEquals("LSGJA52U7YA000001", authResult.vin());
         assertTrue(authResult.acl().get(0).getTopic().contains("DEVICE001"));
+        // 准入成功后建立 hsm_uid ↔ VIN 会话绑定（EDD-VAGW-DSN-CR-007 §4.2）
+        verify(bindingService).rememberAdmission("DEVICE001", "LSGJA52U7YA000001", null);
     }
 
     @Test
@@ -84,6 +89,7 @@ class AuthAclServiceTest {
         var authResult = authAclService.authenticate("device001", "client001", "cert-serial-001");
         assertTrue(authResult.allowed());
         assertTrue(authResult.acl().get(0).getTopic().contains("DEVICE001"));
+        verify(bindingService).rememberAdmission("DEVICE001", "LSGJA52U7YA000001", null);
     }
 
     @Test

@@ -26,6 +26,7 @@ public class AuthAclServiceImpl implements AuthAclService {
     private static final String ADMISSION_ALLOW = "ALLOW";
 
     private final TspDeviceAdmissionService tspDeviceAdmissionService;
+    private final BindingService bindingService;
 
     @Override
     public AuthResult authenticate(String deviceSn, String clientId, String certSerial) {
@@ -54,6 +55,15 @@ public class AuthAclServiceImpl implements AuthAclService {
             if (ADMISSION_ALLOW.equals(result.getAdmission())) {
                 String vin = result.getVin();
                 log.info("Auth success: deviceSn={}, vin={}", normalizedDeviceSn, vin);
+
+                // 准入成功后建立本次会话 hsm_uid ↔ VIN 双向绑定（EDD-VAGW-DSN-CR-007 §4.2），
+                // 上行不依赖外部预热 Redis；bindingVersion 准入接口不返回，由 TSP 回源补齐
+                if (vin != null && !vin.isBlank()) {
+                    bindingService.rememberAdmission(normalizedDeviceSn, vin, null);
+                } else {
+                    log.warn("Auth allowed but TSP admission returned blank vin, binding not remembered: deviceSn={}",
+                            normalizedDeviceSn);
+                }
 
                 // 构建ACL规则
                 List<MqttAuthResponse.AclRule> acl = buildAcl(normalizedDeviceSn);

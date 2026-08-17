@@ -9,7 +9,10 @@ import net.hwyz.iov.cloud.edd.vagw.infrastructure.kafka.EnvelopeDlqPublisher;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.kafka.EnvelopeKafkaProducer;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.route.VehicleRouteCatalog;
 import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
+import net.hwyz.iov.cloud.edd.vagw.service.BindingResolution;
 import net.hwyz.iov.cloud.edd.vagw.service.BindingService;
+import net.hwyz.iov.cloud.edd.vagw.service.InvalidateReason;
+import net.hwyz.iov.cloud.edd.vagw.service.ResolutionStatus;
 import net.hwyz.iov.cloud.edd.vagw.service.SessionService;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Value;
@@ -93,17 +96,29 @@ public class VehicleMessageBridgeService {
             return UplinkResult.fail(ErrorCode.IDENTITY_MISMATCH, "identity mismatch");
         }
 
-        // 4. VIN 绑定：不得为富化改写 Envelope；Kafka Key 使用绑定 VIN
-        Optional<String> vinOpt = bindingService.resolveVin(envelope.getDeviceId());
-        if (vinOpt.isEmpty()) {
-            log.warn("FOTA uplink rejected: VIN unbound, deviceId={}", LogMask.mask(envelope.getDeviceId()));
-            moveToDlqBestEffort(VehicleRouteCatalog.UP_DLQ_TOPIC, topicDeviceKey, envelopeBytes,
-                    "vin_unbound");
+        // 4. 会话绑定校验（EDD-VAGW-DSN-CR-007 §4.2）：上行优先使用准入时写入的会话绑定，
+        //    不依赖外部预热 Redis；上下文缺失 / 依赖不可用 / 冲突与真实 UNBOUND 区分处理
+        BindingResolution bindingRes = bindingService.resolveByHsmUid(envelope.getDeviceId());
+        if (bindingRes.status() != ResolutionStatus.RESOLVED) {
+            String dlqReason = switch (bindingRes.status()) {
+                case CONTEXT_MISSING -> "binding_context_missing";
+                case DEPENDENCY_UNAVAILABLE -> "binding_dependency_unavailable";
+                case BINDING_CONFLICT -> "binding_conflict";
+                default -> "vin_unbound";
+            };
+            ErrorCode ec = switch (bindingRes.status()) {
+                case CONTEXT_MISSING -> ErrorCode.BINDING_CONTEXT_MISSING;
+                case DEPENDENCY_UNAVAILABLE -> ErrorCode.BINDING_DEPENDENCY_UNAVAILABLE;
+                case BINDING_CONFLICT -> ErrorCode.BINDING_CONFLICT;
+                default -> ErrorCode.VIN_UNAUTHORIZED;
+            };
+            log.warn("FOTA uplink rejected: {}, deviceId={}", dlqReason, LogMask.mask(envelope.getDeviceId()));
+            moveToDlqBestEffort(VehicleRouteCatalog.UP_DLQ_TOPIC, topicDeviceKey, envelopeBytes, dlqReason);
             recordUplinkFinal(envelope, envelopeBytes, VehicleBridgeInbox.State.DLQED,
-                    "VIN_UNBOUND", null, null);
-            return UplinkResult.fail(ErrorCode.VIN_UNAUTHORIZED, "VIN not bound");
+                    dlqReason.toUpperCase(), null, null);
+            return UplinkResult.fail(ec, "binding " + dlqReason);
         }
-        String vin = vinOpt.get();
+        String vin = bindingRes.binding().getVin();
         if (!envelope.getVin().isBlank() && !envelope.getVin().equalsIgnoreCase(vin)) {
             log.warn("FOTA uplink rejected: envelope vin mismatch binding, deviceId={}",
                     LogMask.mask(envelope.getDeviceId()));
@@ -260,13 +275,22 @@ public class VehicleMessageBridgeService {
             return moveToDlq(record, kafkaKeyVin, value, "digest_conflict");
         }
 
-        // 4. VIN → device_id 绑定 + Envelope.device_id 一致性 + 在线会话
-        Optional<String> deviceSnOpt = bindingService.resolveDeviceSn(kafkaKeyVin);
-        if (deviceSnOpt.isEmpty()) {
-            return handleNonDeliverable(record, envelope, kafkaKeyVin, DeliveryReason.VIN_UNBOUND);
+        // 4. VIN → hsmUid 绑定（缓存未命中回源 TSP，EDD-VAGW-DSN-CR-007 §6.2）
+        //    + Envelope.device_id 一致性 + 在线会话
+        BindingResolution bindingRes = bindingService.resolveByVin(kafkaKeyVin);
+        if (bindingRes.status() != ResolutionStatus.RESOLVED) {
+            DeliveryReason reason = switch (bindingRes.status()) {
+                case BINDING_CONFLICT -> DeliveryReason.BINDING_CONFLICT;
+                case DEPENDENCY_UNAVAILABLE -> DeliveryReason.BINDING_DEPENDENCY_UNAVAILABLE;
+                case CONTEXT_MISSING -> DeliveryReason.BINDING_CONTEXT_MISSING;
+                default -> DeliveryReason.VIN_UNBOUND;
+            };
+            return handleNonDeliverable(record, envelope, kafkaKeyVin, reason);
         }
-        String deviceId = deviceSnOpt.get();
+        String deviceId = bindingRes.binding().getHsmUid();
         if (!envelope.getDeviceId().equalsIgnoreCase(deviceId)) {
+            // 身份不一致：使旧双向映射失效，避免换件后旧身份命中（CR-007 §5）
+            bindingService.invalidate(kafkaKeyVin, deviceId, InvalidateReason.IDENTITY_MISMATCH);
             return handleNonDeliverable(record, envelope, kafkaKeyVin, DeliveryReason.DEVICE_MISMATCH);
         }
         if (!sessionService.isOnlineByDeviceSn(deviceId)) {
