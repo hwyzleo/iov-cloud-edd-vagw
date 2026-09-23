@@ -47,7 +47,7 @@ class VehicleBridgeInboxTest {
                 .direction(VehicleBridgeInbox.Direction.UPLINK.name())
                 .messageId("m-1")
                 .envelopeSha256("abc")
-                .kafkaTopic("iov.vagw.up.fota")
+                .kafkaTopic("vagw.fota")
                 .state(VehicleBridgeInbox.State.ACCEPTED.name())
                 .outcome("OUTCOME_ACCEPTED")
                 .updatedAt(Instant.now())

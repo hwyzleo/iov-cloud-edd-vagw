@@ -10,7 +10,7 @@ import vagw.v1.Delivery;
 /**
  * 技术投递结果服务（EDD-VAGW-DSN-CR-006 §8）。
  * <p>
- * 将 VAGW 侧不可投递状态映射为 proto-vagw 生成类并生产到 iov.vagw.delivery.fota；
+ * 将 VAGW 侧不可投递状态映射为 proto-vagw 生成类并生产到 vagw.fota.delivery；
  * 应用层只填充生成类，不保存 delivery.proto、wire DTO、Outcome 别名或 JSON fallback。
  * OUTCOME_ACCEPTED 仅表示 VAGW／MQTT 技术接管，OUTCOME_UNKNOWN 不得提升为成功。
  * </p>

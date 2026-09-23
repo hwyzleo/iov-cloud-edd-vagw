@@ -2,12 +2,26 @@ spring:
   application:
     name: vagw
 
-# FOTA 透明桥接配置（EDD-VAGW-DSN-CR-006 §5/§10）
-# Topic 固定：iov.vagw.up.fota / iov.vagw.down.fota / .dlq / iov.vagw.delivery.fota（见 VehicleRouteCatalog），
-# 消费组 edd-vagw-fota-downlink；协议 major 与 manifest 不一致时启动 fail-closed（ProtocolContractGuard）。
+# FOTA 透明桥接配置（EDD-VAGW-DSN-CR-006 §5/§10 + EDD-VAGW-DSN-CR-008）
+# VAGW 作为 Producer 的 4 个 Topic：vagw.fota / vagw.fota.delivery / vagw.fota.dlq.up / vagw.fota.dlq.down
+# （名称见 VagwFotaTopicProperties，生产环境经 Nacos 覆盖）；FOTA 下行业务 Topic iov.vagw.down.fota
+# 由 IOV-OTA 生产、VAGW 消费，消费组 edd-vagw-fota-downlink；
+# 协议 major 与 manifest 不一致时启动 fail-closed（ProtocolContractGuard）。
+iov:
+  kafka:
+    topic-provisioning:
+      enabled: true    # FW-KAFKA：启动时检查并幂等创建 VAGW 生产的 4 个 FOTA Topic（CR-008 §3）
+
 vagw:
   kafka:
+    topic-provisioning:
+      partitions: 3
+      replication-factor: 1
     fota:
+      uplink-topic: vagw.fota
+      delivery-topic: vagw.fota.delivery
+      uplink-dlq-topic: vagw.fota.dlq.up
+      downlink-dlq-topic: vagw.fota.dlq.down
       downlink-concurrency: 3
   fota:
     protocol-major: 1

@@ -23,11 +23,16 @@ import java.time.Instant;
 import java.util.Optional;
 
 /**
- * FOTA 透明桥接编排服务（EDD-VAGW-DSN-CR-006 §6/§7/§9）。
+ * FOTA 透明桥接编排服务（EDD-VAGW-DSN-CR-006 §6/§7/§9 + EDD-VAGW-DSN-CR-008）。
  * <p>
  * 上行 MQTT→Kafka、下行 Kafka→MQTT 均原样转发同一 Envelope bytes；只解析公共 Envelope 元数据，
  * 不解析 payload、不重建 Envelope、不补写 VIN、不生成新业务身份。Kafka offset 仅在 Inbox 与技术
  * 结果可靠收敛后提交；PUBACK 不构造 FOTA RESPONSE。VAGW 只产生技术投递结果。
+ * </p>
+ * <p>
+ * VAGW 作为 Producer 的 4 个 FOTA Topic：vagw.fota / vagw.fota.delivery /
+ * vagw.fota.dlq.up / vagw.fota.dlq.down（EDD-VAGW-DSN-CR-008），名称经
+ * {@link VehicleRouteCatalog}（VagwFotaTopicProperties）读取。
  * </p>
  */
 @Slf4j
@@ -44,6 +49,7 @@ public class VehicleMessageBridgeService {
     private final EnvelopeDlqPublisher dlqPublisher;
     private final VehicleMessageDownlinkPublisher downlinkPublisher;
     private final GatewayDeliveryService gatewayDeliveryService;
+    private final VehicleRouteCatalog routeCatalog;
 
     @Value("${vagw.fota.uplink-produce-retries:3}")
     private int uplinkProduceRetries;
@@ -51,7 +57,7 @@ public class VehicleMessageBridgeService {
     private long uplinkProduceRetryDelayMs;
 
     // ------------------------------------------------------------------
-    // 上行：MQTT → Kafka iov.vagw.up.fota（Key=VIN，value=原 Envelope bytes）
+    // 上行：MQTT → Kafka vagw.fota（Key=VIN，value=原 Envelope bytes）
     // ------------------------------------------------------------------
 
     /**
@@ -69,7 +75,7 @@ public class VehicleMessageBridgeService {
         } catch (Exception e) {
             log.warn("FOTA uplink contract invalid (parse): deviceKey={}, err={}",
                     LogMask.mask(topicDeviceKey), e.getMessage());
-            moveToDlqBestEffort(VehicleRouteCatalog.UP_DLQ_TOPIC, topicDeviceKey, envelopeBytes,
+            moveToDlqBestEffort(routeCatalog.upDlqTopic(), topicDeviceKey, envelopeBytes,
                     "contract_invalid: envelope parse failed");
             return UplinkResult.fail(ErrorCode.INVALID_ENVELOPE, "Envelope parse failed");
         }
@@ -78,7 +84,7 @@ public class VehicleMessageBridgeService {
         VehicleEnvelopeValidator.Failure vf = envelopeValidator.validateUplink(envelope, envelopeBytes);
         if (vf != null) {
             log.warn("FOTA uplink rejected: reason={}: {}", vf.reason(), vf.message());
-            moveToDlqBestEffort(VehicleRouteCatalog.UP_DLQ_TOPIC, topicDeviceKey, envelopeBytes,
+            moveToDlqBestEffort(routeCatalog.upDlqTopic(), topicDeviceKey, envelopeBytes,
                     "contract_invalid: " + vf.reason() + ": " + vf.message());
             recordUplinkFinal(envelope, envelopeBytes, VehicleBridgeInbox.State.DLQED,
                     vf.reason().name(), null, null);
@@ -89,7 +95,7 @@ public class VehicleMessageBridgeService {
         AccessIdentityValidator.Failure ai = accessIdentityValidator.validate(topicDeviceKey, envelope.getDeviceId());
         if (ai != null) {
             log.warn("FOTA uplink identity mismatch: reason={}: {}", ai.reason(), ai.message());
-            moveToDlqBestEffort(VehicleRouteCatalog.UP_DLQ_TOPIC, topicDeviceKey, envelopeBytes,
+            moveToDlqBestEffort(routeCatalog.upDlqTopic(), topicDeviceKey, envelopeBytes,
                     "identity_mismatch: " + ai.message());
             recordUplinkFinal(envelope, envelopeBytes, VehicleBridgeInbox.State.DLQED,
                     ai.reason().name(), null, null);
@@ -113,7 +119,7 @@ public class VehicleMessageBridgeService {
                 default -> ErrorCode.VIN_UNAUTHORIZED;
             };
             log.warn("FOTA uplink rejected: {}, deviceId={}", dlqReason, LogMask.mask(envelope.getDeviceId()));
-            moveToDlqBestEffort(VehicleRouteCatalog.UP_DLQ_TOPIC, topicDeviceKey, envelopeBytes, dlqReason);
+            moveToDlqBestEffort(routeCatalog.upDlqTopic(), topicDeviceKey, envelopeBytes, dlqReason);
             recordUplinkFinal(envelope, envelopeBytes, VehicleBridgeInbox.State.DLQED,
                     dlqReason.toUpperCase(), null, null);
             return UplinkResult.fail(ec, "binding " + dlqReason);
@@ -122,7 +128,7 @@ public class VehicleMessageBridgeService {
         if (!envelope.getVin().isBlank() && !envelope.getVin().equalsIgnoreCase(vin)) {
             log.warn("FOTA uplink rejected: envelope vin mismatch binding, deviceId={}",
                     LogMask.mask(envelope.getDeviceId()));
-            moveToDlqBestEffort(VehicleRouteCatalog.UP_DLQ_TOPIC, topicDeviceKey, envelopeBytes,
+            moveToDlqBestEffort(routeCatalog.upDlqTopic(), topicDeviceKey, envelopeBytes,
                     "vin_mismatch_binding");
             recordUplinkFinal(envelope, envelopeBytes, VehicleBridgeInbox.State.DLQED,
                     "DEVICE_MISMATCH", null, null);
@@ -139,24 +145,24 @@ public class VehicleMessageBridgeService {
                 return UplinkResult.success();
             }
             log.error("FOTA uplink digest conflict: messageId={}", envelope.getMessageId());
-            moveToDlqBestEffort(VehicleRouteCatalog.UP_DLQ_TOPIC, vin, envelopeBytes, "digest_conflict");
+            moveToDlqBestEffort(routeCatalog.upDlqTopic(), vin, envelopeBytes, "digest_conflict");
             return UplinkResult.fail(ErrorCode.INVALID_ENVELOPE, "digest conflict");
         }
 
-        // 6. produce iov.vagw.up.fota, key=VIN（有限重试，原 bytes）
+        // 6. produce vagw.fota, key=VIN（有限重试，原 bytes）
         EnvelopeKafkaProducer.SendResult result = produceWithRetry(envelopeBytes, envelope, vin);
         if (result == null) {
             bridgeInbox.recordFinal(VehicleBridgeInbox.InboxRecord.builder()
                     .direction(VehicleBridgeInbox.Direction.UPLINK.name())
                     .messageId(envelope.getMessageId())
                     .envelopeSha256(digest)
-                    .kafkaTopic(VehicleRouteCatalog.KAFKA_UP_TOPIC)
+                    .kafkaTopic(routeCatalog.kafkaUpTopic())
                     .state(VehicleBridgeInbox.State.DLQED.name())
                     .outcome("OUTCOME_UNKNOWN")
                     .reason("produce_retries_exceeded")
                     .updatedAt(Instant.now())
                     .build());
-            moveToDlqBestEffort(VehicleRouteCatalog.UP_DLQ_TOPIC, vin, envelopeBytes, "produce_retries_exceeded");
+            moveToDlqBestEffort(routeCatalog.upDlqTopic(), vin, envelopeBytes, "produce_retries_exceeded");
             return UplinkResult.fail(ErrorCode.ROUTE_UNAVAILABLE, "Kafka produce failed after retries");
         }
 
@@ -164,7 +170,7 @@ public class VehicleMessageBridgeService {
                 .direction(VehicleBridgeInbox.Direction.UPLINK.name())
                 .messageId(envelope.getMessageId())
                 .envelopeSha256(digest)
-                .kafkaTopic(VehicleRouteCatalog.KAFKA_UP_TOPIC)
+                .kafkaTopic(routeCatalog.kafkaUpTopic())
                 .partition(result.partition())
                 .offset(result.offset())
                 .state(VehicleBridgeInbox.State.ACCEPTED.name())
@@ -184,7 +190,7 @@ public class VehicleMessageBridgeService {
         Exception last = null;
         for (int i = 0; i < uplinkProduceRetries; i++) {
             try {
-                return kafkaProducer.sendUplink(VehicleRouteCatalog.KAFKA_UP_TOPIC, vin,
+                return kafkaProducer.sendUplink(routeCatalog.kafkaUpTopic(), vin,
                         envelopeBytes, envelope, Instant.now().toString());
             } catch (Exception e) {
                 last = e;
@@ -211,7 +217,7 @@ public class VehicleMessageBridgeService {
                 .direction(VehicleBridgeInbox.Direction.UPLINK.name())
                 .messageId(envelope.getMessageId())
                 .envelopeSha256(VehicleBridgeInbox.digestOf(envelopeBytes))
-                .kafkaTopic(VehicleRouteCatalog.KAFKA_UP_TOPIC)
+                .kafkaTopic(routeCatalog.kafkaUpTopic())
                 .partition(partition)
                 .offset(offset)
                 .state(state.name())
@@ -298,7 +304,7 @@ public class VehicleMessageBridgeService {
         }
 
         // 5. 发布 MQTT 下行，复用原 Envelope bytes（QoS1）
-        String mqttTopic = VehicleRouteCatalog.FOTA_ROUTE.mqttDownTopic(envelope.getDeviceId());
+        String mqttTopic = routeCatalog.fotaRoute().mqttDownTopic(envelope.getDeviceId());
         try {
             downlinkPublisher.publish(mqttTopic, value);
         } catch (Exception e) {
@@ -329,7 +335,7 @@ public class VehicleMessageBridgeService {
     }
 
     /**
-     * 不可投递：生产 GatewayDeliveryStatus（iov.vagw.delivery.fota，Key=VIN）并记录 REJECTED。
+     * 不可投递：生产 GatewayDeliveryStatus（vagw.fota.delivery，Key=VIN）并记录 REJECTED。
      * 生产失败则不提交 offset，交由 Kafka 重投（幂等记录避免重复 MQTT 发布）。
      */
     private boolean handleNonDeliverable(ConsumerRecord<String, byte[]> record,
@@ -362,7 +368,7 @@ public class VehicleMessageBridgeService {
 
     private boolean moveToDlq(ConsumerRecord<String, byte[]> record, String key, byte[] value, String reason) {
         try {
-            dlqPublisher.publish(VehicleRouteCatalog.DOWN_DLQ_TOPIC, key, value, reason);
+            dlqPublisher.publish(routeCatalog.downDlqTopic(), key, value, reason);
             return true;
         } catch (Exception e) {
             log.error("FOTA downlink DLQ publish failed: key={}, reason={}", LogMask.mask(key), reason, e);

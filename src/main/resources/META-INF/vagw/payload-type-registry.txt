@@ -2,6 +2,7 @@ vehicle.fota.v1.ConsentReport
 vehicle.fota.v1.ConsentResponse
 vehicle.fota.v1.ControlAckReport
 vehicle.fota.v1.ControlAckResponse
+vehicle.fota.v1.ControlCommand
 vehicle.fota.v1.DownloadGrantRequest
 vehicle.fota.v1.DownloadGrantResponse
 vehicle.fota.v1.EventResponse

@@ -1,6 +1,7 @@
 package net.hwyz.iov.cloud.edd.vagw.application;
 
 import net.hwyz.iov.cloud.edd.vagw.adapter.mqtt.VehicleMessageDownlinkPublisher;
+import net.hwyz.iov.cloud.edd.vagw.config.VagwFotaTopicProperties;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.idempotency.VehicleBridgeInbox;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.kafka.EnvelopeDlqPublisher;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.kafka.EnvelopeKafkaProducer;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import vehicle.common.v1.Envelope;
@@ -53,6 +55,10 @@ class VehicleMessageBridgeServiceTest {
     private VehicleMessageDownlinkPublisher downlinkPublisher;
     @Mock
     private GatewayDeliveryService gatewayDeliveryService;
+
+    /** 真实路由目录（默认 CR-008 目标 Topic 名），供断言与 RouteEntry 使用 */
+    @Spy
+    private VehicleRouteCatalog routeCatalog = new VehicleRouteCatalog(new VagwFotaTopicProperties());
 
     @InjectMocks
     private VehicleMessageBridgeService bridgeService;
@@ -126,7 +132,7 @@ class VehicleMessageBridgeServiceTest {
                 bridgeService.processUplink(bytes, "DEVICE001");
 
         assertTrue(result.ok());
-        verify(kafkaProducer).sendUplink(eq(VehicleRouteCatalog.KAFKA_UP_TOPIC), eq("VIN-A"),
+        verify(kafkaProducer).sendUplink(eq(routeCatalog.kafkaUpTopic()), eq("VIN-A"),
                 eq(bytes), any(), any());
         verify(bridgeInbox).recordFinal(argThat(r ->
                 "ACCEPTED".equals(r.getState()) && "msg-up-001".equals(r.getMessageId())));
@@ -141,7 +147,7 @@ class VehicleMessageBridgeServiceTest {
 
         assertFalse(result.ok());
         assertEquals(ErrorCode.INVALID_ENVELOPE, result.errorCode());
-        verify(dlqPublisher).publish(eq(VehicleRouteCatalog.UP_DLQ_TOPIC), eq("DEVICE001"),
+        verify(dlqPublisher).publish(eq(routeCatalog.upDlqTopic()), eq("DEVICE001"),
                 eq(bad), contains("contract_invalid"));
         verifyNoInteractions(bindingService, kafkaProducer);
     }
@@ -159,7 +165,7 @@ class VehicleMessageBridgeServiceTest {
 
         assertFalse(result.ok());
         assertEquals(ErrorCode.IDENTITY_MISMATCH, result.errorCode());
-        verify(dlqPublisher).publish(eq(VehicleRouteCatalog.UP_DLQ_TOPIC), eq("OTHER"),
+        verify(dlqPublisher).publish(eq(routeCatalog.upDlqTopic()), eq("OTHER"),
                 any(byte[].class), contains("identity_mismatch"));
         verifyNoInteractions(bindingService, kafkaProducer);
     }
@@ -177,7 +183,7 @@ class VehicleMessageBridgeServiceTest {
 
         assertFalse(result.ok());
         assertEquals(ErrorCode.BINDING_CONTEXT_MISSING, result.errorCode());
-        verify(dlqPublisher).publish(eq(VehicleRouteCatalog.UP_DLQ_TOPIC), eq("DEVICE001"),
+        verify(dlqPublisher).publish(eq(routeCatalog.upDlqTopic()), eq("DEVICE001"),
                 any(byte[].class), contains("binding_context_missing"));
         verifyNoInteractions(kafkaProducer);
     }
@@ -195,7 +201,7 @@ class VehicleMessageBridgeServiceTest {
 
         assertFalse(result.ok());
         assertEquals(ErrorCode.BINDING_DEPENDENCY_UNAVAILABLE, result.errorCode());
-        verify(dlqPublisher).publish(eq(VehicleRouteCatalog.UP_DLQ_TOPIC), eq("DEVICE001"),
+        verify(dlqPublisher).publish(eq(routeCatalog.upDlqTopic()), eq("DEVICE001"),
                 any(byte[].class), contains("binding_dependency_unavailable"));
         verifyNoInteractions(kafkaProducer);
     }
@@ -212,7 +218,7 @@ class VehicleMessageBridgeServiceTest {
 
         assertFalse(result.ok());
         assertEquals(ErrorCode.IDENTITY_MISMATCH, result.errorCode());
-        verify(dlqPublisher).publish(eq(VehicleRouteCatalog.UP_DLQ_TOPIC), eq("DEVICE001"),
+        verify(dlqPublisher).publish(eq(routeCatalog.upDlqTopic()), eq("DEVICE001"),
                 any(byte[].class), contains("vin_mismatch_binding"));
     }
 
@@ -252,7 +258,7 @@ class VehicleMessageBridgeServiceTest {
         assertFalse(result.ok());
         assertEquals(ErrorCode.ROUTE_UNAVAILABLE, result.errorCode());
         verify(kafkaProducer, times(3)).sendUplink(any(), any(), any(), any(), any());
-        verify(dlqPublisher).publish(eq(VehicleRouteCatalog.UP_DLQ_TOPIC), eq("VIN-A"),
+        verify(dlqPublisher).publish(eq(routeCatalog.upDlqTopic()), eq("VIN-A"),
                 any(byte[].class), contains("produce_retries_exceeded"));
         verify(bridgeInbox).recordFinal(argThat(r -> "DLQED".equals(r.getState())));
     }
@@ -409,7 +415,7 @@ class VehicleMessageBridgeServiceTest {
         boolean processed = bridgeService.processDownlink(rec);
 
         assertTrue(processed);
-        verify(dlqPublisher).publish(eq(VehicleRouteCatalog.DOWN_DLQ_TOPIC), eq("VIN-A"),
+        verify(dlqPublisher).publish(eq(routeCatalog.downDlqTopic()), eq("VIN-A"),
                 any(byte[].class), contains("contract_invalid"));
     }
 
@@ -427,7 +433,7 @@ class VehicleMessageBridgeServiceTest {
         boolean processed = bridgeService.processDownlink(rec);
 
         assertTrue(processed);
-        verify(dlqPublisher).publish(eq(VehicleRouteCatalog.DOWN_DLQ_TOPIC), eq(vin),
+        verify(dlqPublisher).publish(eq(routeCatalog.downDlqTopic()), eq(vin),
                 any(byte[].class), contains("digest_conflict"));
     }
 
