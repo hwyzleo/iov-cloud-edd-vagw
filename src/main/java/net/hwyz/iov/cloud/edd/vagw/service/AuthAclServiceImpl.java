@@ -10,6 +10,7 @@ import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionResultVo;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
@@ -35,7 +36,7 @@ public class AuthAclServiceImpl implements AuthAclService {
             return AuthResult.deny(ErrorCode.DEVICE_UNKNOWN, "Missing device_sn");
         }
 
-        String normalizedDeviceSn = deviceSn.toUpperCase();
+        String normalizedDeviceSn = deviceSn.toUpperCase(Locale.ROOT);
         if (!DEVICE_SN_PATTERN.matcher(normalizedDeviceSn).matches()) {
             log.warn("Auth failed: invalid device_sn format: {}", deviceSn);
             return AuthResult.deny(ErrorCode.DEVICE_UNKNOWN, "Invalid device_sn format");

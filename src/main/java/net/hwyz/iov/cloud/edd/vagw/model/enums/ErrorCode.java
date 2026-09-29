@@ -20,7 +20,8 @@ public enum ErrorCode {
     MQTT_PUBLISH_FAILED(804012, "MQTT 下行发布失败"),
     BINDING_CONFLICT(804013, "绑定冲突（同 VIN 多条 ACTIVE TBOX）"),
     BINDING_DEPENDENCY_UNAVAILABLE(804014, "绑定反查依赖（TSP）不可用"),
-    BINDING_CONTEXT_MISSING(804015, "上行会话/绑定上下文缺失");
+    BINDING_CONTEXT_MISSING(804015, "上行会话/绑定上下文缺失"),
+    AUTH_IDENTITY_MISMATCH(804016, "连接认证身份不一致或证书身份非法（拒绝接入）");
 
     private final int code;
     private final String message;

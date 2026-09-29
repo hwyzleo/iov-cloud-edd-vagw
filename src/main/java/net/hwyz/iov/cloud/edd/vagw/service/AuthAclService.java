@@ -12,7 +12,9 @@ public interface AuthAclService {
 
     /**
      * 认证设备并返回ACL
-     * @param deviceSn 设备序列号（来自证书CN）
+     * @param deviceSn 已验证证书 CN 的归一化值（EMQX peer_cert_cn，EDD-VAGW-DSN-CR-009 §2）；
+     *                 调用方（MqttAuthController）已强制 username==peer_cert_cn 且通过格式校验，
+     *                 本服务禁止回退使用 MQTT username
      * @param clientId MQTT客户端ID
      * @param certSerial 证书序列号
      * @return 认证结果
