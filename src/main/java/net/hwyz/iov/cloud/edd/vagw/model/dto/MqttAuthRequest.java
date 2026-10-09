@@ -22,6 +22,12 @@ public class MqttAuthRequest {
     private String username;
 
     /**
+     * 密码（VAGW 明文账号模式下，EMQX authn hook 透传的服务凭据；常量时间比较，不落日志）
+     */
+    @JsonProperty("password")
+    private String password;
+
+    /**
      * 客户端ID（=device_sn）
      */
     @JsonProperty("clientid")

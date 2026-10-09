@@ -1,10 +1,16 @@
 package net.hwyz.iov.cloud.edd.vagw.service;
 
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.hwyz.iov.cloud.edd.vagw.config.VagwAuthBypassProperties;
 import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttAuthRequest;
 import org.springframework.stereotype.Component;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * VAGW 自身 MQTT 连接超级用户 bypass 守卫（EDD-VAGW-DSN-CR-009 §2.6/§3/§5）。
@@ -16,7 +22,9 @@ import org.springframework.stereotype.Component;
  * 现采用四因子 AND 校验，任一因子缺失/无法验证一律 fail-closed：
  * <ol>
  *   <li>peerhost 白名单（CIDR/IP），VAGW 自身节点来源；</li>
- *   <li>专属 VAGW 服务证书 CN（mTLS，peer_cert_cn 精确匹配）；</li>
+ *   <li>专属服务凭据（双模式，EDD-VAGW-DSN-CR-010）：配置 service-cert-cn 时校验 mTLS 证书 CN
+ *       （peer_cert_cn 精确匹配，不回退账号模式）；未配置时要求成对配置
+ *       service-username／service-password，校验 username 精确匹配 + password 常量时间比较；</li>
  *   <li>受控 clientId 前缀规则；</li>
  *   <li>独立 internal listener —— HTTP authn 请求不含 listener 标识，该项由 EMQX 网络隔离保证
  *       （仅 internal listener 可达 VAGW 自身连接、TBOX 外部 listener 永不授予 bypass），
@@ -30,6 +38,48 @@ public class SuperuserBypassGuard {
 
     private final VagwAuthBypassProperties properties;
     private final AuthSecurityMetrics metrics;
+
+    /**
+     * 启动配置校验（EDD-VAGW-DSN-CR-010 §4.1）：bypass 启用时必须配齐全部因子——
+     * peerhost 白名单非空、服务凭据模式完整（证书 CN，或账号+口令成对）、clientId 前缀非空；
+     * 否则启动 fail-fast，禁止带病运行（配错即拒绝服务，避免静默降级）。
+     */
+    @PostConstruct
+    void validateConfig() {
+        if (!properties.isEnabled()) {
+            return;
+        }
+        List<String> problems = new ArrayList<>();
+        if (properties.getPeerHostCidrs() == null || properties.getPeerHostCidrs().isEmpty()) {
+            problems.add("peer-host-cidrs must be non-empty");
+        }
+        boolean certMode = isNotBlank(properties.getServiceCertCn());
+        boolean usernameSet = isNotBlank(properties.getServiceUsername());
+        boolean passwordSet = isNotBlank(properties.getServicePassword());
+        if (!certMode && !(usernameSet && passwordSet)) {
+            problems.add("service credential mode incomplete: configure service-cert-cn OR both service-username and service-password");
+        }
+        if (usernameSet != passwordSet) {
+            problems.add("service-username and service-password must be configured together");
+        }
+        if (certMode && (usernameSet || passwordSet)) {
+            log.warn("vagw.auth.bypass: both service-cert-cn and service-username/service-password configured; cert CN mode takes precedence");
+        }
+        if (isBlank(properties.getClientIdPrefix())) {
+            problems.add("client-id-prefix must be non-blank");
+        }
+        if (!problems.isEmpty()) {
+            throw new IllegalStateException("vagw.auth.bypass is enabled but invalid: " + String.join("; ", problems));
+        }
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
+    private static boolean isNotBlank(String value) {
+        return value != null && !value.isBlank();
+    }
 
     public boolean isBypassAllowed(MqttAuthRequest request) {
         if (request == null || !properties.isEnabled()) {
@@ -46,14 +96,10 @@ public class SuperuserBypassGuard {
             return false;
         }
 
-        // 因子 2：专属服务证书 CN（mTLS）
-        String serviceCertCn = properties.getServiceCertCn();
-        if (serviceCertCn == null || serviceCertCn.isBlank()) {
-            metrics.incBypassDenied("no_service_cert_cn");
-            return false;
-        }
-        if (!serviceCertCn.equalsIgnoreCase(request.getPeerCertCn())) {
-            metrics.incBypassDenied("service_cert_cn");
+        // 因子 2：专属服务凭据（双模式，EDD-VAGW-DSN-CR-010）
+        String credentialReason = credentialFailureReason(request);
+        if (credentialReason != null) {
+            metrics.incBypassDenied(credentialReason);
             return false;
         }
 
@@ -69,6 +115,37 @@ public class SuperuserBypassGuard {
         // 因子 4：独立 internal listener —— 部署前置（EMQX 网络隔离），见类注释
         log.debug("VAGW superuser bypass all factors satisfied: peerHost={}", request.getPeerHost());
         return true;
+    }
+
+    /**
+     * 因子 2：服务凭据双模式校验（EDD-VAGW-DSN-CR-010 §4.1）。
+     * 返回失败因子供审计，匹配通过返回 null。
+     * mTLS 模式优先：配置 service-cert-cn 后只校验证书 CN（大小写不敏感，沿用既有行为），
+     * 不回退账号模式；未配置时要求成对配置 service-username／service-password，
+     * username 精确匹配、password 常量时间比较。
+     */
+    private String credentialFailureReason(MqttAuthRequest request) {
+        if (isNotBlank(properties.getServiceCertCn())) {
+            if (properties.getServiceCertCn().equalsIgnoreCase(request.getPeerCertCn())) {
+                return null;
+            }
+            return "service_cert_cn";
+        }
+        if (isNotBlank(properties.getServiceUsername()) && isNotBlank(properties.getServicePassword())) {
+            if (!properties.getServiceUsername().equals(request.getUsername())) {
+                return "service_username";
+            }
+            byte[] expected = properties.getServicePassword().getBytes(StandardCharsets.UTF_8);
+            byte[] actual = request.getPassword() == null
+                    ? new byte[0]
+                    : request.getPassword().getBytes(StandardCharsets.UTF_8);
+            if (!MessageDigest.isEqual(expected, actual)) {
+                return "service_password";
+            }
+            return null;
+        }
+        // 两种模式均未完整配置 → 无凭据，fail-closed（启动校验已保证 enabled 时不会出现，双保险）
+        return "no_service_credential";
     }
 
     private boolean matchesPeerHostAllowlist(String peerHost) {

@@ -33,19 +33,26 @@ vagw:
   # 不做长期负缓存（negative-cache-ttl 恒为 0）
   binding:
     cache-ttl-seconds: 300
-  # 认证安全（EDD-VAGW-DSN-CR-009 §2.6/§5/§9）：VAGW 自身连接超级用户 bypass 四因子配置。
+  # 认证安全（EDD-VAGW-DSN-CR-009 §2.6/§5/§9 + EDD-VAGW-DSN-CR-010）：VAGW 自身连接超级用户 bypass 四因子配置。
   # 默认关闭（最安全）：未显式开启并配齐全部因子时，任何连接都不授予 superuser，
   # 也绝不回退到仅凭 clientId 前缀放行（原前缀放行存在外部伪造提权风险，已移除）。
-  # 生产启用示例：
+  # 服务凭据因子为双模式（EDD-VAGW-DSN-CR-010）：
+  #   - mTLS 模式：配置 service-cert-cn（专属 VAGW 服务证书 CN，校验 peer_cert_cn，优先于账号模式）
+  #   - 明文账号模式（当前 1883 内网部署）：配置 service-username + service-password（成对，Secret 注入）
+  # 生产启用示例（明文账号模式）：
   # auth:
   #   bypass:
   #     enabled: true
   #     peer-host-cidrs:
-  #       - "10.0.0.0/8"                  # VAGW 自身节点来源白名单（必配）
-  #     service-cert-cn: "vagw-service"   # 专属 VAGW 服务证书 CN（mTLS，必配）
+  #       - "10.42.0.0/24"               # VAGW MQTT 客户端源 IPv4/CIDR（必配；不是 EMQX 主机名）
+  #     service-username: "vagw-service"
+  #     service-password: "${VAGW_MQTT_SERVICE_PASSWORD}"
   #     client-id-prefix: "vehicle-access-gateway"
+  # 生产启用示例（mTLS 模式）：将 service-cert-cn 配置为服务证书 CN，其余同明文模式
   # 第四因子“独立 internal listener”无法从 HTTP authn 请求中区分，须由 EMQX 网络隔离保证
   # （仅 internal listener 可达 VAGW 自身连接、TBOX 外部 listener 永不授予 bypass），作为部署前置登记。
+  # 配置校验：enabled=true 时，peer-host-cidrs 非空且服务凭据模式完整（证书 CN，或账号+口令成对），
+  # 否则启动 fail-fast。
 
 # TSP Device Admission Service configuration
 tsp:
