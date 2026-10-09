@@ -167,6 +167,50 @@ class MqttAuthControllerTest {
     }
 
     @Test
+    void authenticate_emqxPlaceholderCertSerial_shouldSanitizeToNullAndAudit() {
+        when(bypassGuard.isBypassAllowed(any())).thenReturn(false);
+
+        // EMQX 不支持的占位符 ${ssl_cert_serial_number} 原样透传 → 置空 + SEC-AUTH 审计，不阻断认证
+        MqttAuthRequest request = MqttAuthRequest.builder()
+                .username("DEVICE-SN-001")
+                .clientId("client001")
+                .peerCertCn("DEVICE-SN-001")
+                .peerCertSerial("${ssl_cert_serial_number}")
+                .build();
+
+        when(authAclService.authenticate("DEVICE-SN-001", "client001", null))
+                .thenReturn(AuthAclService.AuthResult.allow(List.of(), "DEVICE-SN-001", "VIN001"));
+
+        ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
+
+        assertEquals("allow", response.getBody().getResult());
+        verify(authAclService).authenticate("DEVICE-SN-001", "client001", null);
+        verify(metrics).incPlaceholderLeak("peer_cert_serial");
+    }
+
+    @Test
+    void authenticate_nullCertSerial_shouldPassThroughWithoutAudit() {
+        when(bypassGuard.isBypassAllowed(any())).thenReturn(false);
+
+        // certSerial 为空（EMQX body 已删除该字段）→ 正常透传 null，不触发占位符审计
+        MqttAuthRequest request = MqttAuthRequest.builder()
+                .username("DEVICE-SN-001")
+                .clientId("client001")
+                .peerCertCn("DEVICE-SN-001")
+                .peerCertSerial(null)
+                .build();
+
+        when(authAclService.authenticate("DEVICE-SN-001", "client001", null))
+                .thenReturn(AuthAclService.AuthResult.allow(List.of(), "DEVICE-SN-001", "VIN001"));
+
+        ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
+
+        assertEquals("allow", response.getBody().getResult());
+        verify(authAclService).authenticate("DEVICE-SN-001", "client001", null);
+        verify(metrics, never()).incPlaceholderLeak(any());
+    }
+
+    @Test
     void authenticate_fakeClientIdPrefix_withoutBypass_shouldNotBeSuperuser() {
         // 伪造 VAGW 前缀的 clientId，但 bypass 守卫拒绝（如 peerhost 不在白名单）
         when(bypassGuard.isBypassAllowed(any())).thenReturn(false);

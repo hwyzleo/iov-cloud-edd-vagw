@@ -42,6 +42,12 @@ public class AuthSecurityMetrics {
         log.warn("SEC-AUTH | invalid cert identity format");
     }
 
+    /** EMQX HTTP authn 占位符残留（配置了 EMQX 不支持的占位符，原样透传） */
+    public void incPlaceholderLeak(String field) {
+        increment("mqtt_auth_placeholder_leak_total{field=" + field + "}");
+        log.warn("SEC-AUTH | EMQX placeholder leaked, field={}", field);
+    }
+
     /** VAGW 超级用户 bypass 被拒（按因子） */
     public void incBypassDenied(String factor) {
         increment("mqtt_auth_bypass_denied_total{factor=" + factor + "}");

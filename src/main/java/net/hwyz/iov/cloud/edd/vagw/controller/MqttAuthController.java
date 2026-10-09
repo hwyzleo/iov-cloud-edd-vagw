@@ -58,6 +58,10 @@ public class MqttAuthController {
         // ---- 2. TBOX 设备认证 ----
         String certCn = request.getPeerCertCn();
         String claimedUsername = request.getUsername();
+        // 占位符残留防御：EMQX HTTP 认证器不支持的占位符（如 ${ssl_cert_serial_number}）不会被替换、
+        // 而是原样透传到 VAGW。这类值既非真实数据、也不该进入日志与 TSP 准入请求；
+        // 检测到 "${" 即判定为 EMQX 配置错误：置空（fail-safe）+ SEC-AUTH 审计，绝不当作真实值下传。
+        String certSerial = sanitizeEmqxPlaceholder(request.getPeerCertSerial(), "peer_cert_serial");
 
         // 2a. 证书身份缺失 → fail-closed（需求 US-001：无 peer cert 拒绝接入）
         if (certCn == null || certCn.isBlank()) {
@@ -93,10 +97,10 @@ public class MqttAuthController {
         }
 
         log.info("MQTT auth request: deviceSn={}, clientId={}, certSerial={}",
-                LogMask.mask(deviceSn), request.getClientId(), request.getPeerCertSerial());
+                LogMask.mask(deviceSn), request.getClientId(), certSerial);
 
         AuthAclService.AuthResult result = authAclService.authenticate(
-                deviceSn, request.getClientId(), request.getPeerCertSerial());
+                deviceSn, request.getClientId(), certSerial);
 
         if (result.allowed()) {
             MqttAuthResponse response = MqttAuthResponse.builder()
@@ -115,6 +119,20 @@ public class MqttAuthController {
             metrics.incDeny(String.valueOf(result.errorCode().getCode()));
             return ResponseEntity.ok(response);
         }
+    }
+
+    /**
+     * EMQX HTTP authn 占位符残留防御（EDD-VAGW-DSN-CR-009 §2 扩展）：
+     * EMQX 配置里不支持的占位符（如 ${cn}、${ssl_cert_serial_number}）不会被替换、而是原样透传。
+     * 检测到 "${" 即判定为 EMQX 配置错误：返回 null（fail-safe）并触发 SEC-AUTH 审计，
+     * 绝不把占位符残留当真实值写入日志或传给 TSP 准入。
+     */
+    private String sanitizeEmqxPlaceholder(String value, String fieldName) {
+        if (value == null || value.isBlank() || !value.contains("${")) {
+            return value;
+        }
+        metrics.incPlaceholderLeak(fieldName);
+        return null;
     }
 
     /**
