@@ -60,7 +60,7 @@ class VagwKafkaTopicProvisioningIntegrationTest {
         assertTrue(kafkaTopicCatalog.contains("vagw.fota.delivery"), "缺少 vagw.fota.delivery");
         assertTrue(kafkaTopicCatalog.contains("vagw.fota.dlq.up"), "缺少 vagw.fota.dlq.up");
         assertTrue(kafkaTopicCatalog.contains("vagw.fota.dlq.down"), "缺少 vagw.fota.dlq.down");
-        assertFalse(kafkaTopicCatalog.contains("iov.vagw.down.fota"),
+        assertFalse(kafkaTopicCatalog.contains("ota.fota"),
                 "不应声明 IOV-OTA 生产的 FOTA 下行业务 Topic");
     }
 

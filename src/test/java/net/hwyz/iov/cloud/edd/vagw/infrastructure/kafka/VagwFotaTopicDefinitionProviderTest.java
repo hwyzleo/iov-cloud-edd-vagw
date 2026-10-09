@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * <p>
  * 验证 VAGW 作为 Producer 的 4 个 FOTA Topic 声明：vagw.fota / vagw.fota.delivery /
  * vagw.fota.dlq.up / vagw.fota.dlq.down 全覆盖，无遗漏、无多余、无重复；
- * 不声明 IOV-OTA 生产的 FOTA 下行业务 Topic（iov.vagw.down.fota）。
+ * 不声明 IOV-OTA 生产的 FOTA 下行业务 Topic（ota.fota）。
  * </p>
  */
 @DisplayName("VagwFotaTopicDefinitionProvider 测试")
@@ -66,7 +66,7 @@ class VagwFotaTopicDefinitionProviderTest {
         @DisplayName("不声明 IOV-OTA 生产的 FOTA 下行业务 Topic")
         void doesNotDeclareDownstreamTopic() {
             Set<String> topics = declaredTopics();
-            assertFalse(topics.contains("iov.vagw.down.fota"),
+            assertFalse(topics.contains("ota.fota"),
                     "不应声明 FOTA 下行业务 Topic（Producer 为 IOV-OTA）");
         }
 

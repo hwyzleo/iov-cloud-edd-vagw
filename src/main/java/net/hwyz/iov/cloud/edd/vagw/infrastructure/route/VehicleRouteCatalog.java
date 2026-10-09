@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 /**
  * 车辆消息路由目录（EDD-VAGW-DSN-CR-006 §3/§4 + EDD-VAGW-DSN-CR-008 §2）。
  * <p>
- * MQTT up/down/fota、Kafka 下行 iov.vagw.down.fota 与消费组保持不变；
+ * MQTT up/down/fota、Kafka 下行 ota.fota 与消费组保持不变；
  * VAGW 作为 Producer 的 4 个 FOTA Topic（上行业务 / 技术投递结果 / 上行 DLQ / 下行 DLQ）
  * 统一为 vagw.fota、vagw.fota.delivery、vagw.fota.dlq.up、vagw.fota.dlq.down，
  * 名称经 {@link VagwFotaTopicProperties} 环境配置注入，不在代码中硬编码旧名称；
@@ -31,9 +31,9 @@ public class VehicleRouteCatalog {
     public static final String MQTT_DOWN_TEMPLATE = "vehicle/{device-key}/down/fota";
 
     /**
-     * FOTA 下行业务 Topic（VAGW 消费）。Producer 为 IOV-OTA，不在 EDD-VAGW-DSN-CR-008 改名范围。
+     * FOTA 下行业务 Topic（VAGW 消费，ota.fota）。Producer 为 IOV-OTA。
      */
-    public static final String KAFKA_DOWN_TOPIC = "iov.vagw.down.fota";
+    public static final String KAFKA_DOWN_TOPIC = "ota.fota";
 
     /** Kafka 主 Topic Key 固定为 VIN（同 VIN 物理分区顺序） */
     public static final String KAFKA_KEY = "vin";

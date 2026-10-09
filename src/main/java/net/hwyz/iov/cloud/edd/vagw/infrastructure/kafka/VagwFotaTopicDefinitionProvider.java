@@ -20,7 +20,7 @@ import java.util.List;
  * <p>
  * Topic 名称与 {@code VehicleRouteCatalog} 共用 {@link VagwFotaTopicProperties} 配置源；
  * 分区数、副本数通过 {@link VagwKafkaTopicProvisioningProperties} 环境参数注入。
- * 不声明 FOTA 下行业务 Topic（iov.vagw.down.fota）：其 Producer 为 IOV-OTA，不在本 CR 范围。
+ * 不声明 FOTA 下行业务 Topic（ota.fota）：其 Producer 为 IOV-OTA，不在本 CR 范围。
  * </p>
  */
 @Component

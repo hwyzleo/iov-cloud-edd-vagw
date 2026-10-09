@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
 /**
  * 车辆消息下行 Kafka 消费者（EDD-VAGW-DSN-CR-006 §7/§9）。
  * <p>
- * 消费 iov.vagw.down.fota（消费组 edd-vagw-fota-downlink），手动 ack：
+ * 消费 ota.fota（消费组 edd-vagw-fota-downlink），手动 ack：
  * Kafka offset 仅在 Inbox 与技术结果可靠收敛后提交；处理异常不提交，交由 Kafka 重投。
  * </p>
  */

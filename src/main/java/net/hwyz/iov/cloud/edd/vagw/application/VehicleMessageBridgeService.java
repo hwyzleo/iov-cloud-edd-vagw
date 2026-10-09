@@ -228,7 +228,7 @@ public class VehicleMessageBridgeService {
     }
 
     // ------------------------------------------------------------------
-    // 下行：Kafka iov.vagw.down.fota → MQTT vehicle/{device-key}/down/fota（原 bytes）
+    // 下行：Kafka ota.fota → MQTT vehicle/{device-key}/down/fota（原 bytes）
     // ------------------------------------------------------------------
 
     /**
