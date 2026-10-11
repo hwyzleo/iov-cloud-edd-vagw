@@ -2,6 +2,8 @@ package net.hwyz.iov.cloud.edd.vagw.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovContractGuard;
 import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttAuthResponse;
 import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
 import net.hwyz.iov.cloud.iov.tsp.api.service.TspDeviceAdmissionService;
@@ -9,6 +11,7 @@ import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionCheckVo;
 import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionResultVo;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Pattern;
@@ -26,8 +29,16 @@ public class AuthAclServiceImpl implements AuthAclService {
     private static final String TOPIC_PREFIX = "vehicle/";
     private static final String ADMISSION_ALLOW = "ALLOW";
 
+    /**
+     * 设备可用业务 service 白名单（EDD-VAGW-DSN-CR-011 §4，方向敏感显式 ACL，不再使用 vehicle/{cn}/#）。
+     * keyprov 仅在 enabled 且契约兼容时追加，保证关闭时不授 keyprov ACL 且不影响其他 service。
+     */
+    private static final List<String> DEVICE_SERVICES = List.of("fota", "remotecontrol", "remotecontrol_ack");
+
     private final TspDeviceAdmissionService tspDeviceAdmissionService;
     private final BindingService bindingService;
+    private final KeyprovProperties keyprovProperties;
+    private final KeyprovContractGuard keyprovContractGuard;
 
     @Override
     public AuthResult authenticate(String deviceSn, String clientId, String certSerial) {
@@ -100,22 +111,32 @@ public class AuthAclServiceImpl implements AuthAclService {
     }
 
     /**
-     * 构建ACL规则
-     * Topic命名空间使用device_sn
+     * 构建方向敏感的显式 ACL 白名单（EDD-VAGW-DSN-CR-011 §4）。
+     * <p>
+     * 设备侧只允许 publish {@code vehicle/{cn}/up/{service}} 与 subscribe
+     * {@code vehicle/{cn}/down/{service}}；keyprov 仅在 keyprov.enabled=true 且 proto-keyprov
+     * 契约兼容时追加，关闭/不兼容时不返回 keyprov ACL（EMQX 对下行订阅返回 SUBACK failure），
+     * 且其他 service ACL 不受影响。
+     * </p>
      */
     private List<MqttAuthResponse.AclRule> buildAcl(String deviceSn) {
-        String topicNamespace = TOPIC_PREFIX + deviceSn + "/#";
-        return List.of(
-                MqttAuthResponse.AclRule.builder()
-                        .permission("allow")
-                        .action("publish")
-                        .topic(topicNamespace)
-                        .build(),
-                MqttAuthResponse.AclRule.builder()
-                        .permission("allow")
-                        .action("subscribe")
-                        .topic(topicNamespace)
-                        .build()
-        );
+        List<MqttAuthResponse.AclRule> rules = new ArrayList<>();
+        for (String service : DEVICE_SERVICES) {
+            rules.add(aclRule("publish", TOPIC_PREFIX + deviceSn + "/up/" + service));
+            rules.add(aclRule("subscribe", TOPIC_PREFIX + deviceSn + "/down/" + service));
+        }
+        if (keyprovProperties.isEnabled() && keyprovContractGuard.compatible()) {
+            rules.add(aclRule("publish", TOPIC_PREFIX + deviceSn + "/up/keyprov"));
+            rules.add(aclRule("subscribe", TOPIC_PREFIX + deviceSn + "/down/keyprov"));
+        }
+        return rules;
+    }
+
+    private static MqttAuthResponse.AclRule aclRule(String action, String topic) {
+        return MqttAuthResponse.AclRule.builder()
+                .permission("allow")
+                .action(action)
+                .topic(topic)
+                .build();
     }
 }

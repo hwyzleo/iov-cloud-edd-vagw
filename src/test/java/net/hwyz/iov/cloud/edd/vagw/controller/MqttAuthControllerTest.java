@@ -5,6 +5,7 @@ import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttAuthResponse;
 import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
 import net.hwyz.iov.cloud.edd.vagw.service.AuthAclService;
 import net.hwyz.iov.cloud.edd.vagw.service.AuthSecurityMetrics;
+import net.hwyz.iov.cloud.edd.vagw.service.AuthenticatedIdentityStore;
 import net.hwyz.iov.cloud.edd.vagw.service.SuperuserBypassGuard;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,6 +35,9 @@ class MqttAuthControllerTest {
 
     @Mock
     private AuthSecurityMetrics metrics;
+
+    @Mock
+    private AuthenticatedIdentityStore authenticatedIdentityStore;
 
     @InjectMocks
     private MqttAuthController controller;
@@ -70,6 +74,8 @@ class MqttAuthControllerTest {
         assertEquals("allow", response.getBody().getResult());
         assertFalse(response.getBody().getIsSuperuser());
         assertEquals(1, response.getBody().getAcl().size());
+        // 准入成功后固化认证证书身份供会话快照使用（EDD-VAGW-DSN-CR-011 §3.2）
+        verify(authenticatedIdentityStore).save("client001", "DEVICE-SN-001", "CERT-SERIAL-001", null);
     }
 
     @Test

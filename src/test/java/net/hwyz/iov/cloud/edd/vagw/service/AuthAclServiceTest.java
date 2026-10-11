@@ -1,5 +1,7 @@
 package net.hwyz.iov.cloud.edd.vagw.service;
 
+import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovContractGuard;
 import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
 import net.hwyz.iov.cloud.iov.tsp.api.service.TspDeviceAdmissionService;
 import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionCheckVo;
@@ -23,6 +25,12 @@ class AuthAclServiceTest {
     @Mock
     private BindingService bindingService;
 
+    @Mock
+    private KeyprovProperties keyprovProperties;
+
+    @Mock
+    private KeyprovContractGuard keyprovContractGuard;
+
     @InjectMocks
     private AuthAclServiceImpl authAclService;
 
@@ -37,10 +45,12 @@ class AuthAclServiceTest {
         var authResult = authAclService.authenticate("DEVICE001", "client001", "cert-serial-001");
         assertTrue(authResult.allowed());
         assertNotNull(authResult.acl());
-        assertEquals(2, authResult.acl().size());
+        // 方向敏感显式白名单：3 个 service × (publish+subscribe) = 6；keyprov 默认关闭不授予
+        assertEquals(6, authResult.acl().size());
         assertEquals("DEVICE001", authResult.deviceSn());
         assertEquals("LSGJA52U7YA000001", authResult.vin());
         assertTrue(authResult.acl().get(0).getTopic().contains("DEVICE001"));
+        assertTrue(authResult.acl().stream().noneMatch(r -> r.getTopic().contains("keyprov")));
         // 准入成功后建立 hsm_uid ↔ VIN 会话绑定（EDD-VAGW-DSN-CR-007 §4.2）
         verify(bindingService).rememberAdmission("DEVICE001", "LSGJA52U7YA000001", null);
     }

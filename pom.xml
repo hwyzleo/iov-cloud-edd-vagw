@@ -77,6 +77,14 @@
             <artifactId>proto-vagw</artifactId>
             <version>${par-proto.version}</version>
         </dependency>
+        <!-- PAR-PROTO: canonical keyprov wire（security.keyprov.v1 六类消息），
+             VAGW 只做 Envelope 路由元数据 + 结构门禁 + 透明转发，不解析 Wrapped Key 密码学内容、
+             不生成新 requestId（EDD-VAGW-DSN-CR-011，取代 DSN-CR-004 的 KMS 直连方案） -->
+        <dependency>
+            <groupId>net.hwyz.iov.cloud.proto</groupId>
+            <artifactId>proto-keyprov</artifactId>
+            <version>${par-proto.version}</version>
+        </dependency>
         <!-- TSP API: device admission service -->
         <dependency>
             <groupId>net.hwyz.iov.cloud.iov</groupId>

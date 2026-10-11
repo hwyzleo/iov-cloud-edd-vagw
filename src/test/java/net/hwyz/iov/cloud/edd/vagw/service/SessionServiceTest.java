@@ -31,6 +31,9 @@ class SessionServiceTest {
     @Mock
     private BindingService bindingService;
 
+    @Mock
+    private AuthenticatedIdentityStore authenticatedIdentityStore;
+
     private ObjectMapper objectMapper;
 
     @InjectMocks
@@ -40,7 +43,7 @@ class SessionServiceTest {
     void setUp() {
         objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
-        sessionService = new SessionService(redisTemplate, objectMapper, bindingService);
+        sessionService = new SessionService(redisTemplate, objectMapper, bindingService, authenticatedIdentityStore);
     }
 
     @Test
@@ -163,5 +166,24 @@ class SessionServiceTest {
         when(valueOperations.get("vagw:session:DEVICE001")).thenReturn(json);
 
         assertTrue(sessionService.isOnline("VIN001"));
+    }
+
+    @Test
+    void isGenerationCurrent_shouldRequireOnlineAndMatchingGeneration() throws Exception {
+        String json = "{\"deviceSn\":\"DEVICE001\",\"online\":true,\"connectionGeneration\":7}";
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get("vagw:session:DEVICE001")).thenReturn(json);
+
+        assertTrue(sessionService.isGenerationCurrent("DEVICE001", 7));
+        assertFalse(sessionService.isGenerationCurrent("DEVICE001", 6));
+    }
+
+    @Test
+    void isGenerationCurrent_shouldReturnFalseWhenOffline() throws Exception {
+        String json = "{\"deviceSn\":\"DEVICE001\",\"online\":false,\"connectionGeneration\":7}";
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get("vagw:session:DEVICE001")).thenReturn(json);
+
+        assertFalse(sessionService.isGenerationCurrent("DEVICE001", 7));
     }
 }

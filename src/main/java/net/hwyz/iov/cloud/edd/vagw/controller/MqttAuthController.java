@@ -8,6 +8,7 @@ import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttAuthResponse;
 import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
 import net.hwyz.iov.cloud.edd.vagw.service.AuthAclService;
 import net.hwyz.iov.cloud.edd.vagw.service.AuthSecurityMetrics;
+import net.hwyz.iov.cloud.edd.vagw.service.AuthenticatedIdentityStore;
 import net.hwyz.iov.cloud.edd.vagw.service.SuperuserBypassGuard;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -39,6 +40,7 @@ public class MqttAuthController {
     private final AuthAclService authAclService;
     private final SuperuserBypassGuard bypassGuard;
     private final AuthSecurityMetrics metrics;
+    private final AuthenticatedIdentityStore authenticatedIdentityStore;
 
     @PostMapping("/mqtt/auth")
     public ResponseEntity<MqttAuthResponse> authenticate(@RequestBody MqttAuthRequest request) {
@@ -103,6 +105,10 @@ public class MqttAuthController {
                 deviceSn, request.getClientId(), certSerial);
 
         if (result.allowed()) {
+            // 固化本次连接已认证证书身份（非敏感标识），供 client.connected 建立会话快照时并入
+            // （EDD-VAGW-DSN-CR-011 §3.2 ACL_SESSION_CORRELATED）
+            authenticatedIdentityStore.save(request.getClientId(), result.deviceSn(),
+                    certSerial, null);
             MqttAuthResponse response = MqttAuthResponse.builder()
                     .result("allow")
                     .isSuperuser(false)

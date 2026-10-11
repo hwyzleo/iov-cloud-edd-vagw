@@ -1,5 +1,7 @@
 package net.hwyz.iov.cloud.edd.vagw.service;
 
+import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovContractGuard;
 import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
 import net.hwyz.iov.cloud.iov.tsp.api.service.TspDeviceAdmissionService;
 import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionCheckVo;
@@ -26,6 +28,12 @@ class AuthAclServiceImplTest {
     @Mock
     private BindingService bindingService;
 
+    @Mock
+    private KeyprovProperties keyprovProperties;
+
+    @Mock
+    private KeyprovContractGuard keyprovContractGuard;
+
     @InjectMocks
     private AuthAclServiceImpl authAclService;
 
@@ -48,8 +56,48 @@ class AuthAclServiceImplTest {
         assertEquals("VIN001", result.vin());
         assertEquals(deviceSn, result.deviceSn());
         assertNotNull(result.acl());
+        // 方向敏感显式白名单：3 个 service × (publish+subscribe) = 6；keyprov 默认关闭不授予
+        assertEquals(6, result.acl().size());
+        assertTrue(result.acl().stream().noneMatch(r -> r.getTopic().contains("keyprov")));
         // 准入成功后建立 hsm_uid ↔ VIN 会话绑定（EDD-VAGW-DSN-CR-007 §4.2）
         verify(bindingService).rememberAdmission("DEVICE-001", "VIN001", null);
+    }
+
+    @Test
+    void testAuthenticateWithKeyprovEnabled_shouldGrantKeyprovAcl() {
+        DeviceAdmissionResultVo admissionResult = DeviceAdmissionResultVo.builder()
+                .admission("ALLOW")
+                .vin("VIN001")
+                .build();
+        when(tspDeviceAdmissionService.checkDeviceAdmission(any())).thenReturn(admissionResult);
+        when(keyprovProperties.isEnabled()).thenReturn(true);
+        when(keyprovContractGuard.compatible()).thenReturn(true);
+
+        AuthAclService.AuthResult result = authAclService.authenticate("DEVICE-001", "DEVICE-001", "cert-serial-001");
+
+        assertTrue(result.allowed());
+        assertEquals(8, result.acl().size());
+        assertTrue(result.acl().stream().anyMatch(r ->
+                "publish".equals(r.getAction()) && r.getTopic().equals("vehicle/DEVICE-001/up/keyprov")));
+        assertTrue(result.acl().stream().anyMatch(r ->
+                "subscribe".equals(r.getAction()) && r.getTopic().equals("vehicle/DEVICE-001/down/keyprov")));
+    }
+
+    @Test
+    void testAuthenticateWithKeyprovEnabledButContractIncompatible_shouldNotGrantKeyprovAcl() {
+        DeviceAdmissionResultVo admissionResult = DeviceAdmissionResultVo.builder()
+                .admission("ALLOW")
+                .vin("VIN001")
+                .build();
+        when(tspDeviceAdmissionService.checkDeviceAdmission(any())).thenReturn(admissionResult);
+        when(keyprovProperties.isEnabled()).thenReturn(true);
+        when(keyprovContractGuard.compatible()).thenReturn(false);
+
+        AuthAclService.AuthResult result = authAclService.authenticate("DEVICE-001", "DEVICE-001", "cert-serial-001");
+
+        assertTrue(result.allowed());
+        assertEquals(6, result.acl().size());
+        assertTrue(result.acl().stream().noneMatch(r -> r.getTopic().contains("keyprov")));
     }
 
     @Test

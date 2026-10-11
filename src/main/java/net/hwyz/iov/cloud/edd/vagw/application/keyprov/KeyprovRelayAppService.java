@@ -1,0 +1,176 @@
+package net.hwyz.iov.cloud.edd.vagw.application.keyprov;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import net.hwyz.iov.cloud.edd.vagw.adapter.mqtt.KeyprovMqttDownlinkPublisher;
+import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.LogMask;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.client.VmdKeyProvisioningClient;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.client.VmdRelayResponse;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovContractGuard;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovInbox;
+import net.hwyz.iov.cloud.edd.vagw.model.keyprov.BrokerAuthenticatedPublishContext;
+import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovMessageType;
+import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovOutcome;
+import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovReason;
+import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovRelayResult;
+import net.hwyz.iov.cloud.edd.vagw.service.SessionService;
+import org.springframework.stereotype.Service;
+import vehicle.common.v1.Envelope;
+
+import java.security.MessageDigest;
+import java.util.HexFormat;
+import java.util.Optional;
+
+/**
+ * keyprov relay 编排服务（EDD-VAGW-DSN-CR-011 §3.4/§7）。
+ * <p>
+ * 职责仅限：generation guard、correlation、VMD 调用与下行结果映射，保留 requestId/idempotencyKey。
+ * 不负责设备绑定裁决、业务授权、选钥、businessKeyVersion、KMS Wrap、导入 ACK 业务完成或激活状态。
+ * 不写 Kafka/DLQ/DB/Redis/Outbox；Wrapped Key、parameters、importProof 只在调用栈内短暂透传。
+ * </p>
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class KeyprovRelayAppService {
+
+    private final KeyprovProperties properties;
+    private final KeyprovContractGuard contractGuard;
+    private final KeyprovProtocolValidator protocolValidator;
+    private final KeyprovInbox inbox;
+    private final VmdKeyProvisioningClient vmdClient;
+    private final KeyprovEnvelopeFactory envelopeFactory;
+    private final KeyprovMqttDownlinkPublisher downlinkPublisher;
+    private final SessionService sessionService;
+
+    public KeyprovRelayResult relay(BrokerAuthenticatedPublishContext context,
+                                    Envelope.VehicleMessageEnvelope uplink,
+                                    byte[] rawEnvelope) {
+        if (!properties.isEnabled()) {
+            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_DISABLED, messageId(uplink));
+        }
+        if (!contractGuard.compatible()) {
+            log.warn("keyprov relay rejected: contract incompatible, reason={}", contractGuard.incompatibilityReason());
+            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_PROTOCOL_UNSUPPORTED, messageId(uplink));
+        }
+
+        KeyprovProtocolValidator.Failure failure = protocolValidator.validateUplink(uplink, rawEnvelope, context);
+        if (failure != null) {
+            log.warn("keyprov uplink rejected: reason={}, detail={}, hsmUid={}, payloadType={}",
+                    failure.reason(), failure.message(), LogMask.mask(context == null ? null : context.hsmUid()),
+                    LogMask.maskPayloadType(uplink == null ? null : uplink.getPayloadType()));
+            return KeyprovRelayResult.fail(failure.reason(), messageId(uplink));
+        }
+
+        KeyprovMessageType uplinkType = KeyprovMessageType.fromFullName(uplink.getPayloadType()).orElseThrow();
+
+        // 传输层短期去重：相同 messageId+摘要不重复调用 VMD；不同摘要冲突 fail-closed
+        KeyprovInbox.State state = inbox.record(uplink.getMessageId(), sha256(rawEnvelope));
+        if (state == KeyprovInbox.State.CONFLICT) {
+            log.warn("keyprov uplink digest conflict: messageId={}", uplink.getMessageId());
+            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_PAYLOAD_INVALID, uplink.getMessageId());
+        }
+        if (state == KeyprovInbox.State.DUPLICATE) {
+            log.info("keyprov uplink duplicate skipped: messageId={}, payloadType={}",
+                    uplink.getMessageId(), LogMask.maskPayloadType(uplink.getPayloadType()));
+            return KeyprovRelayResult.duplicate(uplink.getMessageId());
+        }
+
+        VmdRelayResponse response;
+        try {
+            response = vmdClient.relay(new VmdKeyProvisioningClient.VmdRelayRequest(
+                    context.source(), context, uplink, uplink.getPayload().toByteArray()));
+        } catch (Exception e) {
+            log.error("keyprov VMD relay failed: requestId={}, messageId={}",
+                    uplink.getRequestId(), uplink.getMessageId(), e);
+            inbox.forget(uplink.getMessageId());
+            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_VMD_UNAVAILABLE, uplink.getMessageId());
+        }
+        if (response == null) {
+            inbox.forget(uplink.getMessageId());
+            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_VMD_UNAVAILABLE, uplink.getMessageId());
+        }
+
+        if (!response.hasPayload()) {
+            inbox.forget(uplink.getMessageId());
+            KeyprovReason reason = mapNoPayloadReason(response.outcome());
+            log.warn("keyprov relay failed (no canonical payload): requestId={}, messageId={}, outcome={}, reason={}",
+                    uplink.getRequestId(), uplink.getMessageId(), response.outcome(), reason);
+            return KeyprovRelayResult.fail(reason, uplink.getMessageId());
+        }
+
+        // VAGW 只按 payloadType 与 correlation 转发：类型必须与上行操作对应且在精确下行 registry 内
+        KeyprovMessageType expectedDownlink = uplinkType.expectedDownlink();
+        if (!expectedDownlink.fullName().equals(response.downlinkPayloadType())
+                || !protocolValidator.isAllowedDownlinkPayloadType(response.downlinkPayloadType())) {
+            log.warn("keyprov downlink payload_type rejected: expected={}, actual={}, messageId={}",
+                    expectedDownlink.fullName(), response.downlinkPayloadType(), uplink.getMessageId());
+            inbox.forget(uplink.getMessageId());
+            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_PROTOCOL_UNSUPPORTED, uplink.getMessageId());
+        }
+
+        // VMD 返回目标身份仅用于交叉校验，不得用 payload 任意寻址
+        if (response.routingHsmUid() != null
+                && !response.routingHsmUid().equalsIgnoreCase(context.hsmUid())) {
+            log.warn("keyprov downlink routing identity mismatch: messageId={}", uplink.getMessageId());
+            inbox.forget(uplink.getMessageId());
+            return KeyprovRelayResult.fail(KeyprovReason.IDENTITY_MISMATCH, uplink.getMessageId());
+        }
+
+        // 下行前再次校验目标身份未被替换（generation guard，fail-closed）
+        if (!sessionService.isGenerationCurrent(context.hsmUid(), context.connectionGeneration())) {
+            log.warn("keyprov downlink rejected: session replaced/stale, messageId={}, hsmUid={}",
+                    uplink.getMessageId(), LogMask.mask(context.hsmUid()));
+            inbox.forget(uplink.getMessageId());
+            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_SESSION_STALE, uplink.getMessageId());
+        }
+
+        byte[] downlinkBytes = envelopeFactory.buildDownlink(
+                context, uplink, response.downlinkPayloadType(), response.downlinkPayload(),
+                response.expireAtMs()).toByteArray();
+
+        String topic;
+        try {
+            topic = downlinkPublisher.publish(context.hsmUid(), downlinkBytes);
+        } catch (Exception e) {
+            log.error("keyprov downlink MQTT publish failed: messageId={}, hsmUid={}",
+                    uplink.getMessageId(), LogMask.mask(context.hsmUid()), e);
+            inbox.forget(uplink.getMessageId());
+            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_DOWNLINK_PUBLISH_FAILED, uplink.getMessageId());
+        }
+
+        log.info("keyprov relayed: requestId={}, messageId={}, uplinkType={}, downlinkType={}, payloadBytes={}",
+                uplink.getRequestId(), uplink.getMessageId(),
+                LogMask.maskPayloadType(uplink.getPayloadType()),
+                LogMask.maskPayloadType(response.downlinkPayloadType()),
+                response.downlinkPayload() == null ? 0 : response.downlinkPayload().length);
+        return KeyprovRelayResult.delivered(uplink.getMessageId(), topic);
+    }
+
+    private static KeyprovReason mapNoPayloadReason(KeyprovOutcome outcome) {
+        if (outcome == null) {
+            return KeyprovReason.KEYPROV_VMD_UNAVAILABLE;
+        }
+        return switch (outcome) {
+            case REJECTED -> KeyprovReason.KEYPROV_VMD_REJECTED;
+            case UNAVAILABLE -> KeyprovReason.KEYPROV_VMD_UNAVAILABLE;
+            case OUTCOME_UNKNOWN -> KeyprovReason.KEYPROV_OUTCOME_UNKNOWN;
+            case SUCCESS -> KeyprovReason.KEYPROV_VMD_UNAVAILABLE;
+        };
+    }
+
+    private static String messageId(Envelope.VehicleMessageEnvelope envelope) {
+        return envelope == null ? null : envelope.getMessageId();
+    }
+
+    private static String sha256(byte[] bytes) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            return HexFormat.of().formatHex(md.digest(bytes == null ? new byte[0] : bytes));
+        } catch (Exception e) {
+            // SHA-256 必然可用；退化用长度避免 NPE（不输出内容）
+            return "len:" + (bytes == null ? 0 : bytes.length);
+        }
+    }
+}

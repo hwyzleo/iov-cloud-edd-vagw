@@ -21,7 +21,8 @@ public enum ErrorCode {
     BINDING_CONFLICT(804013, "绑定冲突（同 VIN 多条 ACTIVE TBOX）"),
     BINDING_DEPENDENCY_UNAVAILABLE(804014, "绑定反查依赖（TSP）不可用"),
     BINDING_CONTEXT_MISSING(804015, "上行会话/绑定上下文缺失"),
-    AUTH_IDENTITY_MISMATCH(804016, "连接认证身份不一致或证书身份非法（拒绝接入）");
+    AUTH_IDENTITY_MISMATCH(804016, "连接认证身份不一致或证书身份非法（拒绝接入）"),
+    KEYPROV_UPSTREAM_FAILURE(804017, "keyprov 上游（VMD）失败（fail-closed，稳定 reason 见 KeyprovReason）");
 
     private final int code;
     private final String message;

@@ -17,11 +17,13 @@ import java.util.concurrent.TimeUnit;
 public class SessionService {
 
     private static final String SESSION_KEY_PREFIX = "vagw:session:";
+    private static final String SESSION_GENERATION_KEY_PREFIX = "vagw:session:gen:";
     private static final long SESSION_TTL_HOURS = 24;
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final BindingService bindingService;
+    private final AuthenticatedIdentityStore authenticatedIdentityStore;
 
     /**
      * 设备上线事件处理
@@ -34,7 +36,13 @@ public class SessionService {
         try {
             // Resolve VIN for northbound enrichment
             String vin = bindingService.resolveVin(deviceSn).orElse(null);
-            
+
+            // connection generation：每次成功连接递增（跨实例经 Redis INCR），用于 keyprov generation guard
+            long generation = nextConnectionGeneration(deviceSn);
+            // 认证期证书身份（EDD-VAGW-DSN-CR-011 §3.2）：由 /mqtt/auth 写入，仅标识元数据
+            AuthenticatedIdentityStore.AuthenticatedIdentity identity =
+                    authenticatedIdentityStore.findByClientId(clientId).orElse(null);
+
             SessionInfo session = SessionInfo.builder()
                     .deviceSn(deviceSn)
                     .vin(vin)
@@ -44,16 +52,42 @@ public class SessionService {
                     .sourceIp(sourceIp)
                     .protoVer(protoVer)
                     .lastSeen(Instant.now())
+                    .connectionGeneration(generation)
+                    .brokerSessionId(clientId)
+                    .certSerial(identity == null ? null : identity.certSerial())
+                    .certFingerprint(identity == null ? null : identity.certFingerprint())
                     .build();
 
             String key = SESSION_KEY_PREFIX + deviceSn;
             String json = objectMapper.writeValueAsString(session);
             redisTemplate.opsForValue().set(key, json, SESSION_TTL_HOURS, TimeUnit.HOURS);
 
-            log.info("Session online: deviceSn={}, vin={}, clientId={}", deviceSn, vin, clientId);
+            log.info("Session online: deviceSn={}, vin={}, clientId={}, generation={}",
+                    deviceSn, vin, clientId, generation);
         } catch (Exception e) {
             log.error("Failed to save session for deviceSn={}", deviceSn, e);
         }
+    }
+
+    private long nextConnectionGeneration(String deviceSn) {
+        try {
+            Long generation = redisTemplate.opsForValue()
+                    .increment(SESSION_GENERATION_KEY_PREFIX + deviceSn);
+            return generation == null ? 0L : generation;
+        } catch (Exception e) {
+            log.warn("Failed to increment connection generation for deviceSn={}", deviceSn, e);
+            return 0L;
+        }
+    }
+
+    /**
+     * keyprov 下行前 generation guard（EDD-VAGW-DSN-CR-011 §5）：
+     * 仅当会话仍在线且 connection generation 与已认证上下文一致时返回 true。
+     */
+    public boolean isGenerationCurrent(String deviceSn, long generation) {
+        return getSessionByDeviceSn(deviceSn)
+                .map(session -> session.isOnline() && session.getConnectionGeneration() == generation)
+                .orElse(false);
     }
 
     /**

@@ -3,7 +3,9 @@ package net.hwyz.iov.cloud.edd.vagw.mqtt;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.hwyz.iov.cloud.edd.vagw.adapter.mqtt.KeyprovMqttIngressAdapter;
 import net.hwyz.iov.cloud.edd.vagw.adapter.mqtt.VehicleMessageUplinkBridge;
+import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,6 +42,11 @@ public class MqttClientManager {
     @Autowired
     @Lazy
     private VehicleMessageUplinkBridge uplinkBridge;
+    @Autowired
+    @Lazy
+    private KeyprovMqttIngressAdapter keyprovIngressAdapter;
+    @Autowired
+    private KeyprovProperties keyprovProperties;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     private MqttClient mqttClient;
@@ -110,12 +117,14 @@ public class MqttClientManager {
         mqttClient.connect(options);
         running = true;
 
-        // Subscribe to uplink shared subscription
-        String[] topics = {"$queue/vehicle/+/up/#"};
-        int[] qos = {1};
-        mqttClient.subscribe(topics, qos);
+        // FOTA 上行共享订阅收窄到 /up/fota，避免与 keyprov 共享订阅重复投递（EDD-VAGW-DSN-CR-011 §3.1）
+        String fotaUplinkTopic = "$queue/vehicle/+/up/fota";
+        String keyprovUplinkTopic = keyprovProperties.getIngressSharedSubscription();
+        mqttClient.subscribe(new String[]{fotaUplinkTopic, keyprovUplinkTopic},
+                new int[]{1, keyprovProperties.getQos()});
 
-        log.info("MQTT connected and subscribed: broker={}, clientId={}", brokerUrl, fullClientId);
+        log.info("MQTT connected and subscribed: broker={}, clientId={}, fotaTopic={}, keyprovTopic={}",
+                brokerUrl, fullClientId, fotaUplinkTopic, keyprovUplinkTopic);
     }
 
     private void handleMessage(String topic, MqttMessage message) {
@@ -133,8 +142,13 @@ public class MqttClientManager {
             log.debug("Uplink message: topic={}, deviceKey={}, service={}, payloadSize={}",
                     topic, deviceKey, service, message.getPayload().length);
 
-            // allowlist（EDD-VAGW-DSN-CR-006 §10）：仅 fota 上行可桥接，其余拒绝，不形成任意隧道
-            uplinkBridge.handleUplink(topic, message.getPayload());
+            // allowlist（EDD-VAGW-DSN-CR-006 §10 / DSN-CR-011 §3.1）：
+            // keyprov 走独立受控入站，fota 与其余交由 FOTA 桥接（非 fota 仍被拒绝），不形成任意隧道
+            if ("keyprov".equals(service)) {
+                keyprovIngressAdapter.handleUplink(topic, message.getPayload());
+            } else {
+                uplinkBridge.handleUplink(topic, message.getPayload());
+            }
         } catch (Exception e) {
             log.error("Error handling MQTT message: topic={}", topic, e);
         }

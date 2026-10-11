@@ -33,6 +33,22 @@ vagw:
   # 不做长期负缓存（negative-cache-ttl 恒为 0）
   binding:
     cache-ttl-seconds: 300
+  # keyprov 能力与门禁（EDD-VAGW-DSN-CR-011 §4/§10）：量产默认 false。
+  # 关闭或 proto-keyprov 契约不兼容时，VAGW 不授予任何 keyprov ACL，也不受理 keyprov 上行，
+  # 且不影响 FOTA/远控等其他 service；仅当 PAR-PROTO/VAGW/VMD/EMQX/TBOX release-set
+  # 全部兼容后才开启。开启前须完成真实 SUBACK 与 Request/Response、Ack/AckResult、
+  # Status/StatusResponse 端到端测试。
+  keyprov:
+    enabled: false
+    protocol-version: keyprov-v1
+    service: security.keyprov
+    max-payload-bytes: 16384          # Envelope.payload 上限：超限整体拒绝，不截断/不分片
+    max-envelope-bytes: 17408         # 上行原始 Envelope bytes 上限（payload + 结构开销）
+    qos: 1
+    # 上行独立共享订阅组；FOTA 订阅已收窄为 $queue/vehicle/+/up/fota，避免重复投递
+    ingress-shared-subscription: "$share/vagw-keyprov/vehicle/+/up/keyprov"
+    # VMD relay SPI：默认注入 DisabledVmdKeyProvisioningClient（fail-closed，不直连 KMS）。
+    # 待 VMD 正式 CR 提供真实 VmdKeyProvisioningClient Bean 后自动覆盖，无需改动 relay 编排。
   # 认证安全（EDD-VAGW-DSN-CR-009 §2.6/§5/§9 + EDD-VAGW-DSN-CR-010）：VAGW 自身连接超级用户 bypass 四因子配置。
   # 默认关闭（最安全）：未显式开启并配齐全部因子时，任何连接都不授予 superuser，
   # 也绝不回退到仅凭 clientId 前缀放行（原前缀放行存在外部伪造提权风险，已移除）。
