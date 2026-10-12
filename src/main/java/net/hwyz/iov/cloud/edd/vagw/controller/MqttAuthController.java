@@ -2,6 +2,7 @@ package net.hwyz.iov.cloud.edd.vagw.controller;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.hwyz.iov.cloud.edd.vagw.application.deviceonline.AdmissionSessionContextRegistry;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.LogMask;
 import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttAuthRequest;
 import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttAuthResponse;
@@ -41,6 +42,7 @@ public class MqttAuthController {
     private final SuperuserBypassGuard bypassGuard;
     private final AuthSecurityMetrics metrics;
     private final AuthenticatedIdentityStore authenticatedIdentityStore;
+    private final AdmissionSessionContextRegistry admissionSessionContextRegistry;
 
     @PostMapping("/mqtt/auth")
     public ResponseEntity<MqttAuthResponse> authenticate(@RequestBody MqttAuthRequest request) {
@@ -109,6 +111,15 @@ public class MqttAuthController {
             // （EDD-VAGW-DSN-CR-011 §3.2 ACL_SESSION_CORRELATED）
             authenticatedIdentityStore.save(request.getClientId(), result.deviceSn(),
                     certSerial, null);
+            // 保存准入候选快照并分配 connection generation（EDD-VAGW-DSN-CR-012 §3.1/§3.2）：
+            // client.connected 仅允许关联本快照；保存失败即 fail-closed，不返回 allow，避免建立不可信会话
+            if (admissionSessionContextRegistry.saveCandidate(result.deviceSn(), result.vin(), certSerial,
+                    request.getClientId(), request.getPeerHost(), request.getProtoVer()).isEmpty()) {
+                log.warn("Auth denied: admission context unavailable, deviceSn={}, clientId={}",
+                        LogMask.mask(result.deviceSn()), request.getClientId());
+                metrics.incDeny(String.valueOf(ErrorCode.DEPENDENCY_UNAVAILABLE.getCode()));
+                return deny(ErrorCode.DEPENDENCY_UNAVAILABLE, "ADMISSION_CONTEXT_UNAVAILABLE");
+            }
             MqttAuthResponse response = MqttAuthResponse.builder()
                     .result("allow")
                     .isSuperuser(false)

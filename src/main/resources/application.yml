@@ -1,6 +1,11 @@
 spring:
   application:
     name: vagw
+  kafka:
+    producer:
+      acks: all                 # 至少一次 / 幂等生产（EDD-VAGW-DSN-CR-012 §3.5）
+      properties:
+        enable.idempotence: true
 
 # FOTA 透明桥接配置（EDD-VAGW-DSN-CR-006 §5/§10 + EDD-VAGW-DSN-CR-008）
 # VAGW 作为 Producer 的 4 个 Topic：vagw.fota / vagw.fota.delivery / vagw.fota.dlq.up / vagw.fota.dlq.down
@@ -17,6 +22,30 @@ vagw:
     topic-provisioning:
       partitions: 3
       replication-factor: 1
+    # 设备上线事件（EDD-VAGW-DSN-CR-012）：VAGW Producer → vagw.device.online，Key=hsmUid，
+    # Redis Stream Outbox 至少一次发布 + 会话对账；Topic 纳入 FW-KAFKA Provisioning Catalog。
+    device-online:
+      topic: vagw.device.online
+      enabled: true
+      outbox-batch-size: 100
+      publish-timeout: 3s
+      dedup-ttl: 7d            # eventId 去重/对账标记保留时长
+      lease-timeout: 30s       # pending 租约：超时可被其他实例认领（多实例条件抢占）
+      backoff-initial: 5s
+      backoff-max: 5m
+      persist-retry-attempts: 3
+      persist-retry-backoff: 50ms
+      reconcile-interval-ms: 60000
+      publish-interval-ms: 5000
+      admission-ttl-seconds: 300
+      partitions: 0            # 0=继承 vagw.kafka.topic-provisioning.partitions
+      replication-factor: 0    # 0=继承 vagw.kafka.topic-provisioning.replication-factor
+      # fail-closed 后主动断连（可选）：配置 EMQX 管理面凭据后启用
+      emqx-api:
+        enabled: false
+        base-url: ""
+        api-key: ""
+        api-secret: ""
     fota:
       uplink-topic: vagw.fota
       delivery-topic: vagw.fota.delivery

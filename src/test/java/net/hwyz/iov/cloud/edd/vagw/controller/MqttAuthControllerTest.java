@@ -1,5 +1,7 @@
 package net.hwyz.iov.cloud.edd.vagw.controller;
 
+import net.hwyz.iov.cloud.edd.vagw.application.deviceonline.AdmissionSessionContextRegistry;
+import net.hwyz.iov.cloud.edd.vagw.model.deviceonline.AdmissionSessionContext;
 import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttAuthRequest;
 import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttAuthResponse;
 import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
@@ -14,7 +16,9 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.ResponseEntity;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -39,8 +43,23 @@ class MqttAuthControllerTest {
     @Mock
     private AuthenticatedIdentityStore authenticatedIdentityStore;
 
+    @Mock
+    private AdmissionSessionContextRegistry admissionSessionContextRegistry;
+
     @InjectMocks
     private MqttAuthController controller;
+
+    @org.junit.jupiter.api.BeforeEach
+    void allowAdmissionContext() {
+        AdmissionSessionContext context = new AdmissionSessionContext(
+                "DEVICE-SN-001", "VIN001", "CERT-SERIAL-001", "client001", null, null, 1L,
+                Instant.now(), Instant.now().plusSeconds(300));
+        org.mockito.Mockito.lenient().when(admissionSessionContextRegistry
+                .saveCandidate(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+                .thenReturn(Optional.of(context));
+    }
 
     private MqttAuthRequest deviceRequest(String username, String certCn) {
         return MqttAuthRequest.builder()

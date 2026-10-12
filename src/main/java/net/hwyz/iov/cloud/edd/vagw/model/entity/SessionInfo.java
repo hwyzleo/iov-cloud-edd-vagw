@@ -35,4 +35,8 @@ public class SessionInfo implements Serializable {
     private String certSerial;
     /** 认证期证书指纹（如可用，可能为 null）。 */
     private String certFingerprint;
+
+    // ---- 设备上线事件（EDD-VAGW-DSN-CR-012 §3.5）----
+    /** 本连接已固化并进入 Outbox 的 DEVICE_ONLINE eventId（用于会话对账与幂等）。 */
+    private String lastDeviceOnlineEventId;
 }

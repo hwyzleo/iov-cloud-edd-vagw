@@ -14,6 +14,14 @@ public class MqttEventRequest {
     @JsonProperty("clientid")
     private String clientId;
 
+    /** EMQX 会话标识（client.connected 事件透传；缺失时以 clientId 作为稳定输入） */
+    @JsonProperty("sessionid")
+    private String sessionId;
+
+    /** EMQX 节点标识（事件来源节点，用于稳定 eventId 与来源审计） */
+    @JsonProperty("node")
+    private String node;
+
     @JsonProperty("ts")
     private Long timestamp;
 

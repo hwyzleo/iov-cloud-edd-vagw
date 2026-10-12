@@ -1,7 +1,9 @@
 package net.hwyz.iov.cloud.edd.vagw.test.kafka;
 
+import net.hwyz.iov.cloud.edd.vagw.config.VagwDeviceOnlineProperties;
 import net.hwyz.iov.cloud.edd.vagw.config.VagwFotaTopicProperties;
 import net.hwyz.iov.cloud.edd.vagw.config.VagwKafkaTopicProvisioningProperties;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.kafka.VagwDeviceOnlineTopicDefinitionProvider;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.kafka.VagwFotaTopicDefinitionProvider;
 import net.hwyz.iov.cloud.framework.kafka.autoconfigure.KafkaTopicProvisioningAutoConfiguration;
 import org.apache.kafka.clients.admin.Admin;
@@ -25,6 +27,7 @@ import org.springframework.context.annotation.Bean;
 @EnableConfigurationProperties({
         KafkaProperties.class,
         VagwFotaTopicProperties.class,
+        VagwDeviceOnlineProperties.class,
         VagwKafkaTopicProvisioningProperties.class
 })
 @ImportAutoConfiguration({
@@ -47,5 +50,12 @@ public class VagwKafkaProvisioningTestConfig {
             VagwFotaTopicProperties fotaTopicProperties,
             VagwKafkaTopicProvisioningProperties provisioningProperties) {
         return new VagwFotaTopicDefinitionProvider(fotaTopicProperties, provisioningProperties);
+    }
+
+    @Bean
+    VagwDeviceOnlineTopicDefinitionProvider vagwDeviceOnlineTopicDefinitionProvider(
+            VagwDeviceOnlineProperties deviceOnlineProperties,
+            VagwKafkaTopicProvisioningProperties provisioningProperties) {
+        return new VagwDeviceOnlineTopicDefinitionProvider(deviceOnlineProperties, provisioningProperties);
     }
 }

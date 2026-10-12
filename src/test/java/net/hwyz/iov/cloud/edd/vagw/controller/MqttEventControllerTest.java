@@ -1,7 +1,7 @@
 package net.hwyz.iov.cloud.edd.vagw.controller;
 
+import net.hwyz.iov.cloud.edd.vagw.application.deviceonline.MqttConnectionEventHandler;
 import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttEventRequest;
-import net.hwyz.iov.cloud.edd.vagw.service.BindingService;
 import net.hwyz.iov.cloud.edd.vagw.service.SessionService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -14,8 +14,10 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 /**
- * MqttEventController 单元测试（EDD-VAGW-DSN-CR-009 §5/§7）
- * 覆盖 connected 事件的 fail-closed（未准入/未绑定设备不建立会话）。
+ * MqttEventController 单元测试（EDD-VAGW-DSN-CR-012 §3.2）。
+ * <p>
+ * connected 事件委派设备上线处理器；disconnected 仅更新会话状态；空身份忽略。
+ * </p>
  */
 @ExtendWith(MockitoExtension.class)
 class MqttEventControllerTest {
@@ -24,41 +26,32 @@ class MqttEventControllerTest {
     private SessionService sessionService;
 
     @Mock
-    private BindingService bindingService;
+    private MqttConnectionEventHandler deviceOnlineHandler;
 
     @InjectMocks
     private MqttEventController controller;
 
-    @Test
-    void handleEvent_connected_boundDevice_shouldCallSessionService() {
+    private MqttEventRequest connectedRequest(String deviceSn) {
         MqttEventRequest request = new MqttEventRequest();
         request.setEvent("client.connected");
-        request.setUsername("DEVICE-SN-001");
+        request.setUsername(deviceSn);
         request.setClientId("client001");
-        when(bindingService.isValidAndBound("DEVICE-SN-001")).thenReturn(true);
-
-        ResponseEntity<Void> response = controller.handleEvent(request);
-
-        assertEquals(200, response.getStatusCode().value());
-        verify(sessionService).onConnected("DEVICE-SN-001", "client001", null, null);
+        return request;
     }
 
     @Test
-    void handleEvent_connected_unboundDevice_shouldFailClosedWithoutSession() {
-        MqttEventRequest request = new MqttEventRequest();
-        request.setEvent("client.connected");
-        request.setUsername("UNKNOWN-SN");
-        request.setClientId("client001");
-        when(bindingService.isValidAndBound("UNKNOWN-SN")).thenReturn(false);
+    void handleEvent_connected_shouldDelegateToDeviceOnlineHandler() {
+        MqttEventRequest request = connectedRequest("DEVICE-SN-001");
 
         ResponseEntity<Void> response = controller.handleEvent(request);
 
         assertEquals(200, response.getStatusCode().value());
+        verify(deviceOnlineHandler).handleConnected(request);
         verifyNoInteractions(sessionService);
     }
 
     @Test
-    void handleEvent_disconnected_shouldCallSessionService() {
+    void handleEvent_disconnected_shouldOnlyUpdateSession() {
         MqttEventRequest request = new MqttEventRequest();
         request.setEvent("client.disconnected");
         request.setUsername("DEVICE-SN-001");
@@ -67,17 +60,17 @@ class MqttEventControllerTest {
 
         assertEquals(200, response.getStatusCode().value());
         verify(sessionService).onDisconnected("DEVICE-SN-001");
+        verifyNoInteractions(deviceOnlineHandler);
     }
 
     @Test
     void handleEvent_blankDeviceSn_shouldIgnore() {
-        MqttEventRequest request = new MqttEventRequest();
-        request.setEvent("client.connected");
-        request.setUsername("");
+        MqttEventRequest request = connectedRequest("");
 
         ResponseEntity<Void> response = controller.handleEvent(request);
 
         assertEquals(200, response.getStatusCode().value());
+        verifyNoInteractions(deviceOnlineHandler);
         verifyNoInteractions(sessionService);
     }
 }

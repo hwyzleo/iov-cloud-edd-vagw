@@ -26,19 +26,40 @@ public class SessionService {
     private final AuthenticatedIdentityStore authenticatedIdentityStore;
 
     /**
-     * 设备上线事件处理
+     * 设备上线事件处理（兼容入口，generation 由 {@link #nextConnectionGeneration} 分配）。
+     *
      * @param deviceSn 设备序列号（主键）
      * @param clientId MQTT 客户端 ID
      * @param sourceIp 来源 IP
      * @param protoVer MQTT 协议版本
      */
     public void onConnected(String deviceSn, String clientId, String sourceIp, Integer protoVer) {
+        onConnected(deviceSn, clientId, sourceIp, protoVer, null, null);
+    }
+
+    /**
+     * 设备上线事件处理（EDD-VAGW-DSN-CR-012 §3.1/§3.5）。
+     * <p>
+     * connection generation 由 {@code /mqtt/auth} 候选态分配、此处提升为 active；传入非空时
+     * 直接复用（保证 Hook 重试与 Kafka 重试 eventId 稳定），为空时兼容旧路径自行分配。
+     * 同时固化本次 DEVICE_ONLINE eventId 供会话对账使用。
+     * </p>
+     *
+     * @param deviceSn 设备序列号（主键）
+     * @param clientId MQTT 客户端 ID
+     * @param sourceIp 来源 IP
+     * @param protoVer MQTT 协议版本
+     * @param generation 准入期已分配的 connection generation（可空）
+     * @param deviceOnlineEventId 本次已固化的 DEVICE_ONLINE eventId（可空）
+     */
+    public void onConnected(String deviceSn, String clientId, String sourceIp, Integer protoVer,
+                            Long generation, String deviceOnlineEventId) {
         try {
             // Resolve VIN for northbound enrichment
             String vin = bindingService.resolveVin(deviceSn).orElse(null);
 
-            // connection generation：每次成功连接递增（跨实例经 Redis INCR），用于 keyprov generation guard
-            long generation = nextConnectionGeneration(deviceSn);
+            // connection generation：auth 候选态分配后提升为 active；兼容路径自行递增
+            long connectionGeneration = generation != null ? generation : nextConnectionGeneration(deviceSn);
             // 认证期证书身份（EDD-VAGW-DSN-CR-011 §3.2）：由 /mqtt/auth 写入，仅标识元数据
             AuthenticatedIdentityStore.AuthenticatedIdentity identity =
                     authenticatedIdentityStore.findByClientId(clientId).orElse(null);
@@ -52,10 +73,11 @@ public class SessionService {
                     .sourceIp(sourceIp)
                     .protoVer(protoVer)
                     .lastSeen(Instant.now())
-                    .connectionGeneration(generation)
+                    .connectionGeneration(connectionGeneration)
                     .brokerSessionId(clientId)
                     .certSerial(identity == null ? null : identity.certSerial())
                     .certFingerprint(identity == null ? null : identity.certFingerprint())
+                    .lastDeviceOnlineEventId(deviceOnlineEventId)
                     .build();
 
             String key = SESSION_KEY_PREFIX + deviceSn;
@@ -63,7 +85,7 @@ public class SessionService {
             redisTemplate.opsForValue().set(key, json, SESSION_TTL_HOURS, TimeUnit.HOURS);
 
             log.info("Session online: deviceSn={}, vin={}, clientId={}, generation={}",
-                    deviceSn, vin, clientId, generation);
+                    deviceSn, vin, clientId, connectionGeneration);
         } catch (Exception e) {
             log.error("Failed to save session for deviceSn={}", deviceSn, e);
         }

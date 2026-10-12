@@ -62,6 +62,8 @@ class VagwKafkaTopicProvisioningIntegrationTest {
         assertTrue(kafkaTopicCatalog.contains("vagw.fota.dlq.down"), "缺少 vagw.fota.dlq.down");
         assertFalse(kafkaTopicCatalog.contains("ota.fota"),
                 "不应声明 IOV-OTA 生产的 FOTA 下行业务 Topic");
+        assertTrue(kafkaTopicCatalog.contains("vagw.device.online"),
+                "缺少设备上线事件 Topic（EDD-VAGW-DSN-CR-012）");
     }
 
     @Test
@@ -104,9 +106,10 @@ class VagwKafkaTopicProvisioningIntegrationTest {
                     "READY 时不应有缺失 Topic");
         } else {
             assertEquals(KafkaTopicProvisioningStatus.State.NOT_READY, provisioningStatus.state());
-            assertEquals(4, provisioningStatus.missingTopics().size(),
+            assertEquals(5, provisioningStatus.missingTopics().size(),
                     "describe 不可靠时缺失集合应为全部声明 Topic");
             assertTrue(provisioningStatus.missingTopics().contains("vagw.fota"));
+            assertTrue(provisioningStatus.missingTopics().contains("vagw.device.online"));
             assertTrue(provisioningStatus.lastFailure().isPresent(), "应记录最近一次失败异常");
             assertTrue(provisioningStatus.nextRetryAt().isPresent(), "应安排后台自动重试");
         }

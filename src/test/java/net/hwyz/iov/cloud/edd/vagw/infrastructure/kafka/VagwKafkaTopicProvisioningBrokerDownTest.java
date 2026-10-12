@@ -52,10 +52,11 @@ class VagwKafkaTopicProvisioningBrokerDownTest {
         assertEquals(KafkaTopicProvisioningStatus.State.NOT_READY, provisioningStatus.state(),
                 "Broker 不可用时 Provisioning 应保持 NOT_READY");
         assertTrue(provisioningStatus.lastFailure().isPresent(), "应记录最近一次失败异常");
-        assertEquals(4, provisioningStatus.missingTopics().size(),
+        assertEquals(5, provisioningStatus.missingTopics().size(),
                 "describe 不可靠时缺失集合应为全部声明 Topic");
         assertTrue(provisioningStatus.missingTopics().contains("vagw.fota"));
         assertTrue(provisioningStatus.missingTopics().contains("vagw.fota.delivery"));
+        assertTrue(provisioningStatus.missingTopics().contains("vagw.device.online"));
         assertTrue(provisioningStatus.nextRetryAt().isPresent(), "应安排后台自动重试");
     }
 }
