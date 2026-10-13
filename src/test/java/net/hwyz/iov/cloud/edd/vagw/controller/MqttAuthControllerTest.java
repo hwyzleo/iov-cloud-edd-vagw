@@ -9,6 +9,7 @@ import net.hwyz.iov.cloud.edd.vagw.service.AuthAclService;
 import net.hwyz.iov.cloud.edd.vagw.service.AuthSecurityMetrics;
 import net.hwyz.iov.cloud.edd.vagw.service.AuthenticatedIdentityStore;
 import net.hwyz.iov.cloud.edd.vagw.service.SuperuserBypassGuard;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -25,39 +26,38 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 /**
- * MqttAuthController 单元测试（EDD-VAGW-DSN-CR-009 §7）
- * 覆盖证书身份锚定、username==CN 一致性校验的 fail-closed 与 VAGW bypass 行为。
+ * MqttAuthController 单元测试（EDD-VAGW-DSN-CR-009 / EDD-VAGW-DSN-CR-013）。
+ * <p>
+ * 覆盖证书身份锚定、username==CN 一致性校验、叶子证书上下文透传与 VAGW bypass 行为。
+ * </p>
  */
 @ExtendWith(MockitoExtension.class)
 class MqttAuthControllerTest {
 
+    private static final String PEM = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----";
+    private static final String SERIAL = "35c7a12acb912925e2ef0a4a1f1666086c4633e8";
+
     @Mock
     private AuthAclService authAclService;
-
     @Mock
     private SuperuserBypassGuard bypassGuard;
-
     @Mock
     private AuthSecurityMetrics metrics;
-
     @Mock
     private AuthenticatedIdentityStore authenticatedIdentityStore;
-
     @Mock
     private AdmissionSessionContextRegistry admissionSessionContextRegistry;
 
     @InjectMocks
     private MqttAuthController controller;
 
-    @org.junit.jupiter.api.BeforeEach
+    @BeforeEach
     void allowAdmissionContext() {
         AdmissionSessionContext context = new AdmissionSessionContext(
-                "DEVICE-SN-001", "VIN001", "CERT-SERIAL-001", "client001", null, null, 1L,
+                "DEVICE-SN-001", "VIN001", SERIAL, "client001", "10.0.0.8", 4, 1L,
                 Instant.now(), Instant.now().plusSeconds(300));
-        org.mockito.Mockito.lenient().when(admissionSessionContextRegistry
-                .saveCandidate(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
-                        org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        lenient().when(admissionSessionContextRegistry
+                .saveCandidate(any(), any(), any(), any(), any(), any()))
                 .thenReturn(Optional.of(context));
     }
 
@@ -66,12 +66,14 @@ class MqttAuthControllerTest {
                 .username(username)
                 .clientId("client001")
                 .peerCertCn(certCn)
-                .peerCertSerial("CERT-SERIAL-001")
+                .peerCert(PEM)
+                .peerHost("10.0.0.8")
+                .protoVer(4)
                 .build();
     }
 
     @Test
-    void authenticate_allowed_shouldReturnAllowWithAcl() {
+    void authenticate_allowed_shouldReturnAllowAndPersistCertSerial() {
         when(bypassGuard.isBypassAllowed(any())).thenReturn(false);
 
         MqttAuthRequest request = deviceRequest("DEVICE-SN-001", "DEVICE-SN-001");
@@ -80,11 +82,11 @@ class MqttAuthControllerTest {
                 MqttAuthResponse.AclRule.builder()
                         .permission("allow")
                         .action("publish")
-                        .topic("vehicle/DEVICE-SN-001/#")
+                        .topic("vehicle/DEVICE-SN-001/up/fota")
                         .build()
         );
-        when(authAclService.authenticate("DEVICE-SN-001", "client001", "CERT-SERIAL-001"))
-                .thenReturn(AuthAclService.AuthResult.allow(acl, "DEVICE-SN-001", "VIN001"));
+        when(authAclService.authenticate("DEVICE-SN-001", "client001", PEM, "10.0.0.8"))
+                .thenReturn(AuthAclService.AuthResult.allow(acl, "DEVICE-SN-001", "VIN001", SERIAL));
 
         ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
 
@@ -93,8 +95,33 @@ class MqttAuthControllerTest {
         assertEquals("allow", response.getBody().getResult());
         assertFalse(response.getBody().getIsSuperuser());
         assertEquals(1, response.getBody().getAcl().size());
-        // 准入成功后固化认证证书身份供会话快照使用（EDD-VAGW-DSN-CR-011 §3.2）
-        verify(authenticatedIdentityStore).save("client001", "DEVICE-SN-001", "CERT-SERIAL-001", null);
+        // canonical serial 由叶子证书解析后固化，供会话快照/上线事件沿用（CR-013 §4.2）
+        verify(authenticatedIdentityStore).save("client001", "DEVICE-SN-001", SERIAL, null);
+        verify(admissionSessionContextRegistry).saveCandidate(
+                "DEVICE-SN-001", "VIN001", SERIAL, "client001", "10.0.0.8", 4);
+    }
+
+    @Test
+    void authenticate_certPemMissing_shouldDenyWithoutTspCall() {
+        when(bypassGuard.isBypassAllowed(any())).thenReturn(false);
+        when(authAclService.authenticate("DEVICE-SN-001", "client001", null, "10.0.0.8"))
+                .thenReturn(AuthAclService.AuthResult.deny(ErrorCode.AUTH_IDENTITY_MISMATCH, "PEM_MISSING"));
+
+        MqttAuthRequest request = MqttAuthRequest.builder()
+                .username("DEVICE-SN-001")
+                .clientId("client001")
+                .peerCertCn("DEVICE-SN-001")
+                .peerCert(null)
+                .peerHost("10.0.0.8")
+                .build();
+
+        ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
+
+        assertEquals("deny", response.getBody().getResult());
+        assertTrue(response.getBody().getReason().contains("804016"));
+        assertTrue(response.getBody().getReason().contains("PEM_MISSING"));
+        verify(authenticatedIdentityStore, never()).save(any(), any(), any(), any());
+        verify(admissionSessionContextRegistry, never()).saveCandidate(any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -103,19 +130,18 @@ class MqttAuthControllerTest {
 
         MqttAuthRequest request = deviceRequest("INVALID", "INVALID");
 
-        when(authAclService.authenticate("INVALID", "client001", "CERT-SERIAL-001"))
-                .thenReturn(AuthAclService.AuthResult.deny(ErrorCode.DEVICE_UNKNOWN, "Invalid device_sn"));
+        when(authAclService.authenticate("INVALID", "client001", PEM, "10.0.0.8"))
+                .thenReturn(AuthAclService.AuthResult.deny(ErrorCode.DEVICE_UNKNOWN, "UID_UNKNOWN"));
 
         ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
 
         assertEquals(200, response.getStatusCode().value());
-        assertNotNull(response.getBody());
         assertEquals("deny", response.getBody().getResult());
         assertTrue(response.getBody().getReason().contains("804001"));
     }
 
     @Test
-    void authenticate_peerCertCnMissing_shouldDenyWithoutTspCall() {
+    void authenticate_peerCertCnMissing_shouldDenyWithoutServiceCall() {
         when(bypassGuard.isBypassAllowed(any())).thenReturn(false);
 
         MqttAuthRequest request = deviceRequest("DEVICE-SN-001", null);
@@ -125,12 +151,12 @@ class MqttAuthControllerTest {
         assertEquals("deny", response.getBody().getResult());
         assertTrue(response.getBody().getReason().contains("804016"));
         assertTrue(response.getBody().getReason().contains("PEER_CERT_CN_MISSING"));
-        verify(authAclService, never()).authenticate(any(), any(), any());
+        verify(authAclService, never()).authenticate(any(), any(), any(), any());
         verify(metrics).incPeerCertMissing();
     }
 
     @Test
-    void authenticate_usernameMissing_shouldDenyWithoutTspCall() {
+    void authenticate_usernameMissing_shouldDenyWithoutServiceCall() {
         when(bypassGuard.isBypassAllowed(any())).thenReturn(false);
 
         MqttAuthRequest request = deviceRequest(null, "DEVICE-SN-001");
@@ -139,7 +165,7 @@ class MqttAuthControllerTest {
 
         assertEquals("deny", response.getBody().getResult());
         assertTrue(response.getBody().getReason().contains("USERNAME_MISSING"));
-        verify(authAclService, never()).authenticate(any(), any(), any());
+        verify(authAclService, never()).authenticate(any(), any(), any(), any());
     }
 
     @Test
@@ -154,90 +180,58 @@ class MqttAuthControllerTest {
         assertEquals("deny", response.getBody().getResult());
         assertTrue(response.getBody().getReason().contains("804016"));
         assertTrue(response.getBody().getReason().contains("IDENTITY_MISMATCH"));
-        verify(authAclService, never()).authenticate(any(), any(), any());
+        verify(authAclService, never()).authenticate(any(), any(), any(), any());
         verify(metrics).incIdentityMismatch();
     }
 
     @Test
-    void authenticate_invalidCertIdentityFormat_shouldDenyWithoutTspCall() {
+    void authenticate_invalidCertIdentityFormat_shouldDenyWithoutServiceCall() {
         when(bypassGuard.isBypassAllowed(any())).thenReturn(false);
 
-        // 证书 CN 归一化后不匹配 ^[A-Z0-9-]{1,64}$ → 拒绝
         MqttAuthRequest request = deviceRequest("BAD@CN", "BAD@CN");
 
         ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
 
         assertEquals("deny", response.getBody().getResult());
-        assertTrue(response.getBody().getReason().contains("804016"));
         assertTrue(response.getBody().getReason().contains("INVALID_CERT_IDENTITY"));
-        verify(authAclService, never()).authenticate(any(), any(), any());
+        verify(authAclService, never()).authenticate(any(), any(), any(), any());
         verify(metrics).incInvalidCertIdentity();
     }
 
     @Test
-    void authenticate_caseInsensitiveMatch_shouldNormalizeAndAllowPath() {
+    void authenticate_caseInsensitiveMatch_shouldNormalizeAndForwardPem() {
         when(bypassGuard.isBypassAllowed(any())).thenReturn(false);
 
-        // 证书 CN 含小写，username 全大写 → 归一化后一致，进入 TSP 路径
         MqttAuthRequest request = deviceRequest("DEVICE-SN-001", "device-sn-001");
 
-        when(authAclService.authenticate("DEVICE-SN-001", "client001", "CERT-SERIAL-001"))
+        when(authAclService.authenticate("DEVICE-SN-001", "client001", PEM, "10.0.0.8"))
                 .thenReturn(AuthAclService.AuthResult.deny(ErrorCode.DEVICE_UNKNOWN, "dummy"));
 
         ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
 
-        // 已进入 service 层（由 TSP 结果决定 allow/deny），说明一致性校验通过且以归一化 CN 传参
-        verify(authAclService).authenticate("DEVICE-SN-001", "client001", "CERT-SERIAL-001");
+        // 进入 service 层说明一致性校验通过，且以归一化 CN + 原始 PEM/peerhost 传参
+        verify(authAclService).authenticate("DEVICE-SN-001", "client001", PEM, "10.0.0.8");
         assertEquals("deny", response.getBody().getResult());
     }
 
     @Test
-    void authenticate_emqxPlaceholderCertSerial_shouldSanitizeToNullAndAudit() {
+    void authenticate_admissionContextUnavailable_shouldFailClosed() {
         when(bypassGuard.isBypassAllowed(any())).thenReturn(false);
+        when(admissionSessionContextRegistry.saveCandidate(any(), any(), any(), any(), any(), any()))
+                .thenReturn(Optional.empty());
+        when(authAclService.authenticate("DEVICE-SN-001", "client001", PEM, "10.0.0.8"))
+                .thenReturn(AuthAclService.AuthResult.allow(List.of(), "DEVICE-SN-001", "VIN001", SERIAL));
 
-        // EMQX 不支持的占位符 ${ssl_cert_serial_number} 原样透传 → 置空 + SEC-AUTH 审计，不阻断认证
-        MqttAuthRequest request = MqttAuthRequest.builder()
-                .username("DEVICE-SN-001")
-                .clientId("client001")
-                .peerCertCn("DEVICE-SN-001")
-                .peerCertSerial("${ssl_cert_serial_number}")
-                .build();
+        ResponseEntity<MqttAuthResponse> response = controller.authenticate(
+                deviceRequest("DEVICE-SN-001", "DEVICE-SN-001"));
 
-        when(authAclService.authenticate("DEVICE-SN-001", "client001", null))
-                .thenReturn(AuthAclService.AuthResult.allow(List.of(), "DEVICE-SN-001", "VIN001"));
-
-        ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
-
-        assertEquals("allow", response.getBody().getResult());
-        verify(authAclService).authenticate("DEVICE-SN-001", "client001", null);
-        verify(metrics).incPlaceholderLeak("peer_cert_serial");
-    }
-
-    @Test
-    void authenticate_nullCertSerial_shouldPassThroughWithoutAudit() {
-        when(bypassGuard.isBypassAllowed(any())).thenReturn(false);
-
-        // certSerial 为空（EMQX body 已删除该字段）→ 正常透传 null，不触发占位符审计
-        MqttAuthRequest request = MqttAuthRequest.builder()
-                .username("DEVICE-SN-001")
-                .clientId("client001")
-                .peerCertCn("DEVICE-SN-001")
-                .peerCertSerial(null)
-                .build();
-
-        when(authAclService.authenticate("DEVICE-SN-001", "client001", null))
-                .thenReturn(AuthAclService.AuthResult.allow(List.of(), "DEVICE-SN-001", "VIN001"));
-
-        ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
-
-        assertEquals("allow", response.getBody().getResult());
-        verify(authAclService).authenticate("DEVICE-SN-001", "client001", null);
-        verify(metrics, never()).incPlaceholderLeak(any());
+        assertEquals("deny", response.getBody().getResult());
+        assertTrue(response.getBody().getReason().contains("804010"));
+        assertTrue(response.getBody().getReason().contains("ADMISSION_CONTEXT_UNAVAILABLE"));
     }
 
     @Test
     void authenticate_fakeClientIdPrefix_withoutBypass_shouldNotBeSuperuser() {
-        // 伪造 VAGW 前缀的 clientId，但 bypass 守卫拒绝（如 peerhost 不在白名单）
         when(bypassGuard.isBypassAllowed(any())).thenReturn(false);
 
         MqttAuthRequest request = MqttAuthRequest.builder()
@@ -251,11 +245,11 @@ class MqttAuthControllerTest {
         assertNotNull(response.getBody());
         assertEquals("deny", response.getBody().getResult());
         assertFalse(response.getBody().getIsSuperuser());
-        verify(authAclService, never()).authenticate(any(), any(), any());
+        verify(authAclService, never()).authenticate(any(), any(), any(), any());
     }
 
     @Test
-    void authenticate_bypassAllowed_shouldReturnSuperuserWithoutTspCall() {
+    void authenticate_bypassAllowed_shouldReturnSuperuserWithoutServiceCall() {
         when(bypassGuard.isBypassAllowed(any())).thenReturn(true);
 
         MqttAuthRequest request = MqttAuthRequest.builder()
@@ -266,7 +260,7 @@ class MqttAuthControllerTest {
 
         assertEquals("allow", response.getBody().getResult());
         assertTrue(response.getBody().getIsSuperuser());
-        verify(authAclService, never()).authenticate(any(), any(), any());
+        verify(authAclService, never()).authenticate(any(), any(), any(), any());
         verify(metrics).incBypassAllowed();
     }
 }

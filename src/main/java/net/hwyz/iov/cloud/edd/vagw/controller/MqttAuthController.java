@@ -62,10 +62,6 @@ public class MqttAuthController {
         // ---- 2. TBOX 设备认证 ----
         String certCn = request.getPeerCertCn();
         String claimedUsername = request.getUsername();
-        // 占位符残留防御：EMQX HTTP 认证器不支持的占位符（如 ${ssl_cert_serial_number}）不会被替换、
-        // 而是原样透传到 VAGW。这类值既非真实数据、也不该进入日志与 TSP 准入请求；
-        // 检测到 "${" 即判定为 EMQX 配置错误：置空（fail-safe）+ SEC-AUTH 审计，绝不当作真实值下传。
-        String certSerial = sanitizeEmqxPlaceholder(request.getPeerCertSerial(), "peer_cert_serial");
 
         // 2a. 证书身份缺失 → fail-closed（需求 US-001：无 peer cert 拒绝接入）
         if (certCn == null || certCn.isBlank()) {
@@ -100,20 +96,24 @@ public class MqttAuthController {
             return deny(ErrorCode.AUTH_IDENTITY_MISMATCH, "INVALID_CERT_IDENTITY");
         }
 
-        log.info("MQTT auth request: deviceSn={}, clientId={}, certSerial={}",
-                LogMask.mask(deviceSn), request.getClientId(), certSerial);
+        log.info("MQTT auth request: deviceSn={}, clientId={}",
+                LogMask.mask(deviceSn), request.getClientId());
 
+        // 完整认证上下文（含本次 mTLS 叶子证书 PEM 与可信来源 IP）交给应用服务：
+        // 由 AuthAclServiceImpl 在调用 TSP 前构造证书上下文，Controller 不拼接 Base64/DER
+        // （EDD-VAGW-DSN-CR-013 §6）。
         AuthAclService.AuthResult result = authAclService.authenticate(
-                deviceSn, request.getClientId(), certSerial);
+                deviceSn, request.getClientId(), request.getPeerCert(), request.getPeerHost());
 
         if (result.allowed()) {
             // 固化本次连接已认证证书身份（非敏感标识），供 client.connected 建立会话快照时并入
-            // （EDD-VAGW-DSN-CR-011 §3.2 ACL_SESSION_CORRELATED）
+            // （EDD-VAGW-DSN-CR-011 §3.2 ACL_SESSION_CORRELATED）；canonical serial 由叶子证书解析
+            // （EDD-VAGW-DSN-CR-013 §4.2，沿用既有契约，不新增副本）
             authenticatedIdentityStore.save(request.getClientId(), result.deviceSn(),
-                    certSerial, null);
+                    result.certSerial(), null);
             // 保存准入候选快照并分配 connection generation（EDD-VAGW-DSN-CR-012 §3.1/§3.2）：
             // client.connected 仅允许关联本快照；保存失败即 fail-closed，不返回 allow，避免建立不可信会话
-            if (admissionSessionContextRegistry.saveCandidate(result.deviceSn(), result.vin(), certSerial,
+            if (admissionSessionContextRegistry.saveCandidate(result.deviceSn(), result.vin(), result.certSerial(),
                     request.getClientId(), request.getPeerHost(), request.getProtoVer()).isEmpty()) {
                 log.warn("Auth denied: admission context unavailable, deviceSn={}, clientId={}",
                         LogMask.mask(result.deviceSn()), request.getClientId());
@@ -128,28 +128,19 @@ public class MqttAuthController {
             log.info("Auth allowed: deviceSn={}, vin={}", LogMask.mask(result.deviceSn()), LogMask.mask(result.vin()));
             return ResponseEntity.ok(response);
         } else {
+            // 使用服务层提供的语义 reason（枚举/校验 outcome），便于 EMQX 侧审计与告警；
+            // 不包含证书正文、UID、serial、fingerprint 或 IP
+            String denyReason = result.reason() == null
+                    ? result.errorCode().getMessage()
+                    : result.reason();
             MqttAuthResponse response = MqttAuthResponse.builder()
                     .result("deny")
-                    .reason(result.errorCode().getCode() + ": " + result.errorCode().getMessage())
+                    .reason(result.errorCode().getCode() + ": " + denyReason)
                     .build();
             log.warn("Auth denied: deviceSn={}, reason={}", LogMask.mask(deviceSn), result.reason());
             metrics.incDeny(String.valueOf(result.errorCode().getCode()));
             return ResponseEntity.ok(response);
         }
-    }
-
-    /**
-     * EMQX HTTP authn 占位符残留防御（EDD-VAGW-DSN-CR-009 §2 扩展）：
-     * EMQX 配置里不支持的占位符（如 ${cn}、${ssl_cert_serial_number}）不会被替换、而是原样透传。
-     * 检测到 "${" 即判定为 EMQX 配置错误：返回 null（fail-safe）并触发 SEC-AUTH 审计，
-     * 绝不把占位符残留当真实值写入日志或传给 TSP 准入。
-     */
-    private String sanitizeEmqxPlaceholder(String value, String fieldName) {
-        if (value == null || value.isBlank() || !value.contains("${")) {
-            return value;
-        }
-        metrics.incPlaceholderLeak(fieldName);
-        return null;
     }
 
     /**

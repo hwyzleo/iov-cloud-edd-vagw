@@ -58,6 +58,20 @@ vagw:
     max-payload-bytes: 262016
     uplink-produce-retries: 3
     uplink-produce-retry-delay-ms: 500
+  # 设备准入（EDD-VAGW-DSN-CR-013 §7）
+  # 超时预算基线：framework PKI total-timeout=1s ≤ VAGW→TSP read-timeout(1.5s)-250ms
+  # ≤ EMQX→VAGW HTTP auth timeout(≥2s)-500ms；读超时代表结果未知，不做第二次 /decide。
+  admission:
+    peer-certificate:
+      required: true        # 生产固定 true；false 时设备准入 NOT_READY/拒绝，绝不回退仅凭 CN 的 ALLOW
+      max-der-bytes: 8192   # 解析前后 DER 上限，超限 fail-closed，不截断
+    tsp:
+      path: /api/service/deviceAdmission/v1/decide
+      connect-timeout: 250ms
+      read-timeout: 1500ms
+      retry-on-read-timeout: false
+    emqx-auth:
+      required-timeout: 2s  # EMQX → VAGW HTTP authn 回调预算（部署前置）
   # 绑定解析配置（EDD-VAGW-DSN-CR-007 §8）：缓存有界 TTL，未命中回源 TSP；
   # 不做长期负缓存（negative-cache-ttl 恒为 0）
   binding:
@@ -108,9 +122,9 @@ feign:
   client:
     config:
       tsp-device-admission:
-        connectTimeout: 500
-        readTimeout: 500
-        loggerLevel: basic
+        connectTimeout: 250
+        readTimeout: 1500
+        loggerLevel: basic   # 禁止 body/FULL 日志，避免 PEM/DER 进入日志
       tsp-vehicle-access-identity:
         connectTimeout: 500
         readTimeout: 500

@@ -19,6 +19,8 @@ import java.util.concurrent.atomic.AtomicLong;
 public class AuthSecurityMetrics {
 
     private final Map<String, AtomicLong> counters = new ConcurrentHashMap<>();
+    private final AtomicLong tspAdmissionLatencyCount = new AtomicLong();
+    private final AtomicLong tspAdmissionLatencySumMs = new AtomicLong();
 
     private void increment(String name) {
         counters.computeIfAbsent(name, key -> new AtomicLong()).incrementAndGet();
@@ -42,12 +44,6 @@ public class AuthSecurityMetrics {
         log.warn("SEC-AUTH | invalid cert identity format");
     }
 
-    /** EMQX HTTP authn 占位符残留（配置了 EMQX 不支持的占位符，原样透传） */
-    public void incPlaceholderLeak(String field) {
-        increment("mqtt_auth_placeholder_leak_total{field=" + field + "}");
-        log.warn("SEC-AUTH | EMQX placeholder leaked, field={}", field);
-    }
-
     /** VAGW 超级用户 bypass 被拒（按因子） */
     public void incBypassDenied(String factor) {
         increment("mqtt_auth_bypass_denied_total{factor=" + factor + "}");
@@ -62,6 +58,32 @@ public class AuthSecurityMetrics {
     /** 认证拒绝（按错误码） */
     public void incDeny(String code) {
         increment("mqtt_auth_deny_total{reason=" + code + "}");
+    }
+
+    /**
+     * 叶子证书校验结果（EDD-VAGW-DSN-CR-013 §7）：outcome 为脱敏分类标签，
+     * 不得包含 PEM/DER、UID、serial、fingerprint 或 IP。
+     */
+    public void incPeerCertificateValidation(String outcome) {
+        increment("mqtt_peer_certificate_validation_total{outcome=" + outcome + "}");
+        log.warn("SEC-AUTH | peer certificate validation failed, outcome={}", outcome);
+    }
+
+    /** TSP 准入裁决结果（decision/reason 均为语义枚举名，不含身份标识） */
+    public void incTspAdmission(String decision, String reason) {
+        increment("mqtt_tsp_admission_total{decision=" + decision + ",reason=" + reason + "}");
+    }
+
+    /** TSP 准入裁决调用耗时（毫秒），用于对齐 read-timeout 预算 */
+    public void recordTspAdmissionLatency(long millis) {
+        tspAdmissionLatencyCount.incrementAndGet();
+        tspAdmissionLatencySumMs.addAndGet(Math.max(millis, 0L));
+    }
+
+    /** 平均 TSP 准入裁决耗时（毫秒）；无样本时为 0 */
+    public double getTspAdmissionLatencyAvgMs() {
+        long count = tspAdmissionLatencyCount.get();
+        return count == 0 ? 0d : (double) tspAdmissionLatencySumMs.get() / count;
     }
 
     public long get(String name) {
