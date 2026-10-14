@@ -4,8 +4,17 @@ spring:
   kafka:
     producer:
       acks: all                 # 至少一次 / 幂等生产（EDD-VAGW-DSN-CR-012 §3.5）
+      retries: 2147483647       # 幂等 Producer 必须 retries>0，防止共享配置下发 0
+      # Value 为原始字节（Proto Envelope / DeviceOnlineEvent JSON bytes），Key 为 String：
+      # 若共享 kafka.yaml 覆盖为非 ByteArray，由 VagwKafkaPropertiesNormalizer 兜底归一化
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.ByteArraySerializer
       properties:
         enable.idempotence: true
+    consumer:
+      # FOTA 下行 ConsumerRecord<String, byte[]>
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
 
 # FOTA 透明桥接配置（EDD-VAGW-DSN-CR-006 §5/§10 + EDD-VAGW-DSN-CR-008）
 # VAGW 作为 Producer 的 4 个 Topic：vagw.fota / vagw.fota.delivery / vagw.fota.dlq.up / vagw.fota.dlq.down
