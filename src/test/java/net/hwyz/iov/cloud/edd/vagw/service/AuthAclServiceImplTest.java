@@ -252,6 +252,17 @@ class AuthAclServiceImplTest {
     }
 
     @Test
+    void authenticate_identityMismatch_shouldMapTo804016() {
+        when(tspDeviceAdmissionService.decide(any())).thenReturn(denyResult(AdmissionReason.IDENTITY_MISMATCH));
+
+        AuthAclService.AuthResult result = authAclService.authenticate(
+                "DEVICE-001", "client001", validPem, "10.0.0.8");
+
+        assertFalse(result.allowed());
+        assertEquals(ErrorCode.AUTH_IDENTITY_MISMATCH, result.errorCode(), "IDENTITY_MISMATCH → 804016");
+    }
+
+    @Test
     void authenticate_revokedExpiredBlockedRetiredOrDependency_shouldMapToDeviceBlocked() {
         for (AdmissionReason reason : new AdmissionReason[]{
                 AdmissionReason.CERT_REVOKED, AdmissionReason.CERT_EXPIRED,

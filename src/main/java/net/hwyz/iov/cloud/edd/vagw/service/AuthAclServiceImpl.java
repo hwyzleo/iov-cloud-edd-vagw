@@ -162,7 +162,9 @@ public class AuthAclServiceImpl implements AuthAclService {
     }
 
     /**
-     * 映射 TSP 裁决原因到网关错误码（EDD-VAGW-DSN-CR-013 §5）。
+     * 映射 TSP 裁决原因到网关错误码（EDD-VAGW-DSN-CR-013 §5 / TSP-DSN-CR-011 §4.4）：
+     * UID_UNKNOWN/UNBOUND/BINDING_CONFLICT → 804001；IDENTITY_MISMATCH → 804016；
+     * 其余证书状态/依赖不可用/未知 reason → 804002（fail-closed）。
      */
     private ErrorCode mapReasonToErrorCode(AdmissionReason reason) {
         if (reason == null) {
@@ -170,8 +172,11 @@ public class AuthAclServiceImpl implements AuthAclService {
         }
         return switch (reason) {
             case UID_UNKNOWN, UNBOUND, BINDING_CONFLICT -> ErrorCode.DEVICE_UNKNOWN;
+            case IDENTITY_MISMATCH -> ErrorCode.AUTH_IDENTITY_MISMATCH;
             case CERT_REVOKED, CERT_EXPIRED, DEVICE_BLOCKED, DEVICE_RETIRED,
                  DEPENDENCY_UNAVAILABLE, NONE -> ErrorCode.DEVICE_BLOCKED;
+            // 未知 reason（含后续 iov-tsp-api 新增枚举）一律 fail-closed 至 804002
+            default -> ErrorCode.DEVICE_BLOCKED;
         };
     }
 
