@@ -138,6 +138,32 @@ class AuthAdmissionPathIntegrationTest {
     }
 
     @Test
+    void emqxBase64DerCertificate_shouldAllowAndForwardExactDer() throws Exception {
+        tsp.response = allowResult();
+
+        ResponseEntity<MqttAuthResponse> response = controller.authenticate(request(base64Der(validPem)));
+
+        assertEquals("allow", response.getBody().getResult());
+        assertEquals(1, tsp.calls.size());
+        DeviceAdmissionCheckVo vo = tsp.calls.get(0);
+        assertEquals(DEVICE, vo.getUid());
+        assertEquals(EXPECTED_SERIAL, vo.getCertSerial());
+        assertArrayEquals(derOf(validPem), Base64.getDecoder().decode(vo.getLeafCertificateDer()));
+        verify(admissionContextRegistry).saveCandidate(DEVICE, "VIN001", EXPECTED_SERIAL, CLIENT_ID, SOURCE_IP, 4);
+    }
+
+    @Test
+    void placeholderLeak_shouldDeny804016BeforeTspCall() {
+        ResponseEntity<MqttAuthResponse> response = controller.authenticate(request("${cert_pem}"));
+
+        assertEquals("deny", response.getBody().getResult());
+        assertTrue(response.getBody().getReason().contains("804016"));
+        assertTrue(response.getBody().getReason().contains("PEM_PLACEHOLDER_LEAK"));
+        assertTrue(tsp.calls.isEmpty(), "placeholder leak must not call TSP");
+        assertEquals(1L, metrics.get("mqtt_peer_certificate_validation_total{outcome=PEM_PLACEHOLDER_LEAK}"));
+    }
+
+    @Test
     void revokedCertificate_shouldDeny804002() {
         tsp.response = DeviceAdmissionResultVo.builder()
                 .decision(AdmissionDecision.DENY)
@@ -203,7 +229,7 @@ class AuthAdmissionPathIntegrationTest {
 
         assertEquals("deny", response.getBody().getResult());
         assertTrue(response.getBody().getReason().contains("804016"));
-        assertTrue(response.getBody().getReason().contains("CERT_CN_MISMATCH"));
+        assertTrue(response.getBody().getReason().contains("CN_MISMATCH"));
         assertTrue(tsp.calls.isEmpty(), "CN mismatch must not call TSP");
     }
 
@@ -240,6 +266,16 @@ class AuthAdmissionPathIntegrationTest {
     private static X509Certificate parseDer(byte[] der) throws Exception {
         return (X509Certificate) CertificateFactory.getInstance("X.509")
                 .generateCertificate(new java.io.ByteArrayInputStream(der));
+    }
+
+    private static byte[] derOf(String pem) throws Exception {
+        X509Certificate certificate = (X509Certificate) CertificateFactory.getInstance("X.509")
+                .generateCertificate(new java.io.ByteArrayInputStream(pem.getBytes(StandardCharsets.UTF_8)));
+        return certificate.getEncoded();
+    }
+
+    private static String base64Der(String pem) throws Exception {
+        return Base64.getEncoder().encodeToString(derOf(pem));
     }
 
     private static String cn(X509Certificate certificate) throws Exception {

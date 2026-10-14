@@ -24,4 +24,13 @@ public record VerifiedPeerCertificate(
     public byte[] der() {
         return der == null ? null : der.clone();
     }
+
+    /**
+     * 诊断输出不包含 DER、UID、serial 或 fingerprint（EDD-VAGW-DSN-CR-014 §7.1），
+     * 避免证书派生敏感值经日志泄漏。
+     */
+    @Override
+    public String toString() {
+        return "VerifiedPeerCertificate[redacted, derBytes=" + (der == null ? 0 : der.length) + "]";
+    }
 }

@@ -30,8 +30,9 @@ import java.util.regex.Pattern;
 /**
  * 认证ACL服务实现（EDD-VAGW-DSN-CR-009 / EDD-VAGW-DSN-CR-013）。
  * <p>
- * 在调用 TSP 准入裁决前，由 {@link PeerCertificateContextFactory} 从 EMQX 透传的叶子证书 PEM
- * 构造瞬时证书上下文（serial/fingerprint/Base64 DER），任一异常 fail-closed；
+ * 在调用 TSP 准入裁决前，由 {@link PeerCertificateContextFactory} 从 EMQX 透传的叶子证书
+ * （{@code ${cert_pem}} 原样值，标准 Base64(DER) 或严格 PEM）构造瞬时证书上下文
+ * （serial/fingerprint/Base64 DER），任一异常 fail-closed；
  * 适配 TSP-DSN-CR-011 canonical {@code /decide} 与新 VO 枚举。
  * </p>
  */

@@ -65,6 +65,9 @@ vagw:
     peer-certificate:
       required: true        # 生产固定 true；false 时设备准入 NOT_READY/拒绝，绝不回退仅凭 CN 的 ALLOW
       max-der-bytes: 8192   # 解析前后 DER 上限，超限 fail-closed，不截断
+      # 入站证书编码能力声明（EDD-VAGW-DSN-CR-014 §8）：启动校验必须恰好为 [PEM, BASE64_DER]，
+      # 缺失/未知/重复即启动失败；不作为灰度或降级开关，运行时始终同时启用两种解析能力，不支持动态刷新。
+      accepted-encodings: [PEM, BASE64_DER]
     tsp:
       path: /api/service/deviceAdmission/v1/decide
       connect-timeout: 250ms

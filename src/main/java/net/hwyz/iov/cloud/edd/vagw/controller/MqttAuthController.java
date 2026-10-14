@@ -99,7 +99,7 @@ public class MqttAuthController {
         log.info("MQTT auth request: deviceSn={}, clientId={}",
                 LogMask.mask(deviceSn), request.getClientId());
 
-        // 完整认证上下文（含本次 mTLS 叶子证书 PEM 与可信来源 IP）交给应用服务：
+        // 完整认证上下文（含本次 mTLS 叶子证书 Base64(DER)/PEM 与可信来源 IP）交给应用服务：
         // 由 AuthAclServiceImpl 在调用 TSP 前构造证书上下文，Controller 不拼接 Base64/DER
         // （EDD-VAGW-DSN-CR-013 §6）。
         AuthAclService.AuthResult result = authAclService.authenticate(

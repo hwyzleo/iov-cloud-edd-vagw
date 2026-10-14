@@ -1,10 +1,16 @@
 package net.hwyz.iov.cloud.edd.vagw.config;
 
+import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * 设备准入配置（EDD-VAGW-DSN-CR-013 §7）。
@@ -39,6 +45,12 @@ public class VagwAdmissionProperties {
         private boolean required = true;
         /** 解析前后 DER 上限（字节），超限 fail-closed，不截断、不解析 */
         private int maxDerBytes = 8192;
+        /**
+         * 入站证书编码能力声明（EDD-VAGW-DSN-CR-014 §8）：固定 {@code [PEM, BASE64_DER]}。
+         * 启动校验必须恰好包含两项；不作为灰度/降级开关，运行时始终同时启用两种解析能力，
+         * 不支持动态刷新。
+         */
+        private List<String> acceptedEncodings = new ArrayList<>(List.of("PEM", "BASE64_DER"));
     }
 
     /**
@@ -60,5 +72,40 @@ public class VagwAdmissionProperties {
     @Data
     public static class EmqxAuth {
         private Duration requiredTimeout = Duration.ofSeconds(2);
+    }
+
+    /**
+     * 启动校验入站证书编码能力声明（EDD-VAGW-DSN-CR-014 §8）：必须恰好为 {@code {PEM, BASE64_DER}}，
+     * 缺失、未知值或重复配置均启动失败（fail-fast）。该配置不控制解析分支：运行时始终同时启用
+     * PEM 与 Base64(DER)，也不会因配置变化关闭其中一种。
+     */
+    @PostConstruct
+    void validateAcceptedEncodings() {
+        Set<String> expected = Set.of("PEM", "BASE64_DER");
+        List<String> encodings = peerCertificate.getAcceptedEncodings();
+        if (encodings == null) {
+            throw new IllegalStateException(
+                    "vagw.admission.peer-certificate.accepted-encodings must be exactly [PEM, BASE64_DER]");
+        }
+        Set<String> seen = new HashSet<>();
+        for (String encoding : encodings) {
+            if (encoding == null || encoding.isBlank()) {
+                throw new IllegalStateException(
+                        "vagw.admission.peer-certificate.accepted-encodings contains blank value");
+            }
+            String normalized = encoding.trim().toUpperCase(Locale.ROOT);
+            if (!expected.contains(normalized)) {
+                throw new IllegalStateException(
+                        "vagw.admission.peer-certificate.accepted-encodings contains unknown value: " + encoding);
+            }
+            if (!seen.add(normalized)) {
+                throw new IllegalStateException(
+                        "vagw.admission.peer-certificate.accepted-encodings contains duplicate value: " + encoding);
+            }
+        }
+        if (!seen.equals(expected)) {
+            throw new IllegalStateException(
+                    "vagw.admission.peer-certificate.accepted-encodings must be exactly [PEM, BASE64_DER]");
+        }
     }
 }

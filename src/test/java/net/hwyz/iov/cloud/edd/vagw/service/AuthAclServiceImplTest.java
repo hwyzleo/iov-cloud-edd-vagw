@@ -121,6 +121,36 @@ class AuthAclServiceImplTest {
     }
 
     @Test
+    void authenticate_allowWithEmqxBase64Der_shouldForwardStandardBase64Der() throws Exception {
+        when(tspDeviceAdmissionService.decide(any())).thenReturn(allowResult());
+
+        AuthAclService.AuthResult result = authAclService.authenticate(
+                "DEVICE-001", "client001", base64Der(validPem), "10.0.0.8");
+
+        assertTrue(result.allowed());
+        assertEquals("35c7a12acb912925e2ef0a4a1f1666086c4633e8", result.certSerial());
+
+        ArgumentCaptor<DeviceAdmissionCheckVo> captor = ArgumentCaptor.forClass(DeviceAdmissionCheckVo.class);
+        verify(tspDeviceAdmissionService).decide(captor.capture());
+        DeviceAdmissionCheckVo vo = captor.getValue();
+        byte[] forwardedDer = Base64.getDecoder().decode(vo.getLeafCertificateDer());
+        assertArrayEquals(derBytes(validPem), forwardedDer);
+        assertEquals(vo.getCertFingerprint(), sha256Hex(forwardedDer));
+    }
+
+    @Test
+    void authenticate_placeholderLeak_shouldDenyWithoutTspCall() {
+        AuthAclService.AuthResult result = authAclService.authenticate(
+                "DEVICE-001", "client001", "${cert_pem}", "10.0.0.8");
+
+        assertFalse(result.allowed());
+        assertEquals(ErrorCode.AUTH_IDENTITY_MISMATCH, result.errorCode());
+        assertEquals("PEM_PLACEHOLDER_LEAK", result.reason());
+        verifyNoInteractions(tspDeviceAdmissionService);
+        verify(metrics).incPeerCertificateValidation("PEM_PLACEHOLDER_LEAK");
+    }
+
+    @Test
     void authenticate_keyprovEnabledAndCompatible_shouldGrantKeyprovAcl() {
         when(tspDeviceAdmissionService.decide(any())).thenReturn(allowResult());
         when(keyprovProperties.isEnabled()).thenReturn(true);
@@ -167,7 +197,7 @@ class AuthAclServiceImplTest {
 
         assertFalse(result.allowed());
         assertEquals(ErrorCode.AUTH_IDENTITY_MISMATCH, result.errorCode());
-        assertEquals("CERT_CN_MISMATCH", result.reason());
+        assertEquals("CN_MISMATCH", result.reason());
         verifyNoInteractions(tspDeviceAdmissionService);
     }
 
@@ -307,6 +337,16 @@ class AuthAclServiceImplTest {
         assertTrue(result.allowed());
         assertEquals("DEVICE-001", result.deviceSn());
         assertTrue(result.acl().get(0).getTopic().contains("DEVICE-001"));
+    }
+
+    private static byte[] derBytes(String pem) throws Exception {
+        X509Certificate certificate = (X509Certificate) CertificateFactory.getInstance("X.509")
+                .generateCertificate(new ByteArrayInputStream(pem.getBytes(StandardCharsets.UTF_8)));
+        return certificate.getEncoded();
+    }
+
+    private static String base64Der(String pem) throws Exception {
+        return Base64.getEncoder().encodeToString(derBytes(pem));
     }
 
     private static String resource(String path) {
