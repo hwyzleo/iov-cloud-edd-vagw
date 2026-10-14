@@ -1,5 +1,6 @@
 package net.hwyz.iov.cloud.edd.vagw.model.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -20,11 +21,17 @@ import lombok.ToString;
  * peer_cert 与 password 为敏感字段：不参与自动生成的 toString/equals 诊断输出，避免证书正文与
  * 服务凭据进入普通日志。
  * </p>
+ * <p>
+ * EMQX 不同版本/协议下可能携带额外字段（如 {@code receive_maximum}、{@code keepalive}、
+ * {@code expiry_interval} 等 MQTT 属性）；本 DTO 仅消费所需子集，其余字段一律忽略，
+ * 避免因 EMQX 字段漂移导致认证 hook 反序列化失败而整体拒绝接入。
+ * </p>
  */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class MqttAuthRequest {
 
     /**

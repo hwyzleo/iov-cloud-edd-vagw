@@ -1,5 +1,6 @@
 package net.hwyz.iov.cloud.edd.vagw.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import net.hwyz.iov.cloud.edd.vagw.application.deviceonline.MqttConnectionEventHandler;
 import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttEventRequest;
 import net.hwyz.iov.cloud.edd.vagw.service.SessionService;
@@ -61,6 +62,31 @@ class MqttEventControllerTest {
         assertEquals(200, response.getStatusCode().value());
         verify(sessionService).onDisconnected("DEVICE-SN-001");
         verifyNoInteractions(deviceOnlineHandler);
+    }
+
+    @Test
+    void deserialize_disconnectedWithEmqxExtraFields_shouldIgnoreUnknown() throws Exception {
+        String json = "{\"event\":\"client.disconnected\",\"clientid\":\"HWYZTEST900000001-00000005AA00000001\","
+                + "\"username\":\"DEVICE-SN-001\",\"disconnected_at\":{\"seconds\":1760447799,\"nanoseconds\":21000000},"
+                + "\"reason\":\"normal\"}";
+
+        MqttEventRequest request = new ObjectMapper().readValue(json, MqttEventRequest.class);
+
+        assertEquals("client.disconnected", request.getEvent());
+        assertEquals("DEVICE-SN-001", request.getUsername());
+        assertEquals("HWYZTEST900000001-00000005AA00000001", request.getClientId());
+    }
+
+    @Test
+    void deserialize_connectedWithMqtt5Properties_shouldIgnoreUnknown() throws Exception {
+        String json = "{\"event\":\"client.connected\",\"clientid\":\"client001\",\"username\":\"DEVICE-SN-001\","
+                + "\"receive_maximum\":32,\"keepalive\":60,\"expiry_interval\":300,\"proto_ver\":5}";
+
+        MqttEventRequest request = new ObjectMapper().readValue(json, MqttEventRequest.class);
+
+        assertEquals("client.connected", request.getEvent());
+        assertEquals("DEVICE-SN-001", request.getUsername());
+        assertEquals(5, request.getProtoVer());
     }
 
     @Test

@@ -1,5 +1,6 @@
 package net.hwyz.iov.cloud.edd.vagw.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import net.hwyz.iov.cloud.edd.vagw.application.deviceonline.AdmissionSessionContextRegistry;
 import net.hwyz.iov.cloud.edd.vagw.model.deviceonline.AdmissionSessionContext;
 import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttAuthRequest;
@@ -70,6 +71,22 @@ class MqttAuthControllerTest {
                 .peerHost("10.0.0.8")
                 .protoVer(4)
                 .build();
+    }
+
+    @Test
+    void deserialize_authRequestWithExtraEmqxFields_shouldIgnoreUnknown() throws Exception {
+        String json = "{\"username\":\"DEVICE-SN-001\",\"clientid\":\"client001\","
+                + "\"peer_cert_cn\":\"DEVICE-SN-001\",\"peer_cert\":\"" + PEM.replace("\n", "\\n") + "\","
+                + "\"peer_host\":\"10.0.0.8\",\"proto_ver\":5,\"receive_maximum\":32,\"keepalive\":60,"
+                + "\"expiry_interval\":300,\"password\":null}";
+
+        MqttAuthRequest request = new ObjectMapper().readValue(json, MqttAuthRequest.class);
+
+        assertEquals("DEVICE-SN-001", request.getUsername());
+        assertEquals("client001", request.getClientId());
+        assertEquals("DEVICE-SN-001", request.getPeerCertCn());
+        assertEquals("10.0.0.8", request.getPeerHost());
+        assertEquals(5, request.getProtoVer());
     }
 
     @Test
