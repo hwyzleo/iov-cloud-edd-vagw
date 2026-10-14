@@ -13,6 +13,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableDiscoveryClient
 @SpringBootApplication
 @EnableCustomFeignClients
+@EnableScheduling
 public class Application {
 
     static {
