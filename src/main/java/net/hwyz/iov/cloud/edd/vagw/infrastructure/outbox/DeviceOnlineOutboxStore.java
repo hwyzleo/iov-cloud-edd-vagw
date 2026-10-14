@@ -28,6 +28,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -304,16 +305,28 @@ public class DeviceOnlineOutboxStore {
         }
         List<DeviceOnlineOutboxEntry> entries = new ArrayList<>(records.size());
         for (ByteRecord record : records) {
-            Map<byte[], byte[]> value = record.getValue();
+            Map<String, byte[]> value = toStringKeyedMap(record.getValue());
             entries.add(new DeviceOnlineOutboxEntry(
                     record.getId(),
-                    bytes(value.get(FIELD_EVENT_ID.getBytes(StandardCharsets.UTF_8))),
-                    bytes(value.get(FIELD_KAFKA_KEY.getBytes(StandardCharsets.UTF_8))),
-                    bytes(value.get(FIELD_PAYLOAD.getBytes(StandardCharsets.UTF_8))),
-                    bytes(value.get(FIELD_AGGREGATE_HASH.getBytes(StandardCharsets.UTF_8))),
-                    bytes(value.get(FIELD_OCCURRED_AT.getBytes(StandardCharsets.UTF_8)))));
+                    bytes(value.get(FIELD_EVENT_ID)),
+                    bytes(value.get(FIELD_KAFKA_KEY)),
+                    bytes(value.get(FIELD_PAYLOAD)),
+                    bytes(value.get(FIELD_AGGREGATE_HASH)),
+                    bytes(value.get(FIELD_OCCURRED_AT))));
         }
         return entries;
+    }
+
+    /**
+     * ByteRecord 的字段名是 {@code byte[]}，不能直接用 {@code Map.get(byte[])} 查找
+     * （Java 数组按引用比较，永远取不到），先归一化为 String 键。
+     */
+    private static Map<String, byte[]> toStringKeyedMap(Map<byte[], byte[]> value) {
+        Map<String, byte[]> result = new HashMap<>(value.size());
+        for (Map.Entry<byte[], byte[]> field : value.entrySet()) {
+            result.put(new String(field.getKey(), StandardCharsets.UTF_8), field.getValue());
+        }
+        return result;
     }
 
     private static String bytes(byte[] value) {

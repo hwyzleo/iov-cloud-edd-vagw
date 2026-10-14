@@ -22,6 +22,7 @@
         <protobuf.version>3.25.5</protobuf.version>
         <!-- PAR-PROTO release（EDD-VAGW-DSN-CR-006 锁定） -->
         <par-proto.version>0.0.1-SNAPSHOT</par-proto.version>
+        <testcontainers.version>1.19.8</testcontainers.version>
     </properties>
 
     <dependencies>
@@ -95,6 +96,19 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Testcontainers: 真实 Redis 集成测试（DeviceOnlineOutboxStore readNew/claimStale 真实路径） -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>testcontainers</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
