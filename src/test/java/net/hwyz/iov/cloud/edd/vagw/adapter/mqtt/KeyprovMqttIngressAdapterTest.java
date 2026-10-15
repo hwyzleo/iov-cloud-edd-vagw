@@ -7,6 +7,7 @@ import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovContractGuard;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.BrokerAuthenticatedPublishContext;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovContextSource;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovRelayResult;
+import net.hwyz.iov.cloud.edd.vagw.service.VagwMqttSubscriptionMetrics;
 import net.hwyz.iov.security.keyprov.v1.KeyProvisioningRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,7 +41,8 @@ class KeyprovMqttIngressAdapterTest {
     void setUp() {
         properties = new KeyprovProperties();
         properties.setEnabled(true);
-        adapter = new KeyprovMqttIngressAdapter(properties, contractGuard, contextResolver, relayService);
+        adapter = new KeyprovMqttIngressAdapter(properties, contractGuard, contextResolver, relayService,
+                new VagwMqttSubscriptionMetrics());
     }
 
     private byte[] validEnvelope() {

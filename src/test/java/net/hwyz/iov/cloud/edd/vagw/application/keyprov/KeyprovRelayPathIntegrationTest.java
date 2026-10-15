@@ -2,6 +2,7 @@ package net.hwyz.iov.cloud.edd.vagw.application.keyprov;
 
 import net.hwyz.iov.cloud.edd.vagw.adapter.mqtt.KeyprovMqttDownlinkPublisher;
 import net.hwyz.iov.cloud.edd.vagw.adapter.mqtt.KeyprovMqttIngressAdapter;
+import net.hwyz.iov.cloud.edd.vagw.service.VagwMqttSubscriptionMetrics;
 import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.client.VmdKeyProvisioningClient;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.client.VmdRelayResponse;
@@ -69,7 +70,8 @@ class KeyprovRelayPathIntegrationTest {
         KeyprovEnvelopeFactory envelopeFactory = new KeyprovEnvelopeFactory(properties);
         KeyprovRelayAppService relay = new KeyprovRelayAppService(properties, guard, validator, inbox,
                 vmdClient, envelopeFactory, downlinkPublisher, sessionService);
-        adapter = new KeyprovMqttIngressAdapter(properties, guard, resolver, relay);
+        adapter = new KeyprovMqttIngressAdapter(properties, guard, resolver, relay,
+                new VagwMqttSubscriptionMetrics());
     }
 
     private SessionInfo onlineSession() {

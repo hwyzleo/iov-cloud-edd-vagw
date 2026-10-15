@@ -38,9 +38,6 @@ public class KeyprovProperties {
     /** message_id / request_id 等标识长度上限（UTF-8 bytes），有界防滥用。 */
     private int identifierMaxLength = 128;
 
-    /** keyprov 上行共享订阅（独立消费组，避免与 FOTA 桥接重复投递）。 */
-    private String ingressSharedSubscription = "$share/vagw-keyprov/vehicle/+/up/keyprov";
-
     /** 传输层短期去重窗口（秒）；窗口内重复 messageId 不重复调用 VMD。 */
     private long inboxTtlSeconds = 300;
 

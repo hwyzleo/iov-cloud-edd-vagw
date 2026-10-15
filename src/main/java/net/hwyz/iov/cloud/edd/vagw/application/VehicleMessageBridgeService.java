@@ -14,6 +14,7 @@ import net.hwyz.iov.cloud.edd.vagw.service.BindingService;
 import net.hwyz.iov.cloud.edd.vagw.service.InvalidateReason;
 import net.hwyz.iov.cloud.edd.vagw.service.ResolutionStatus;
 import net.hwyz.iov.cloud.edd.vagw.service.SessionService;
+import net.hwyz.iov.cloud.edd.vagw.service.VagwMqttSubscriptionMetrics;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -50,6 +51,7 @@ public class VehicleMessageBridgeService {
     private final VehicleMessageDownlinkPublisher downlinkPublisher;
     private final GatewayDeliveryService gatewayDeliveryService;
     private final VehicleRouteCatalog routeCatalog;
+    private final VagwMqttSubscriptionMetrics mqttMetrics;
 
     @Value("${vagw.fota.uplink-produce-retries:3}")
     private int uplinkProduceRetries;
@@ -142,6 +144,7 @@ public class VehicleMessageBridgeService {
         if (existing.isPresent()) {
             if (digest.equals(existing.get().getEnvelopeSha256())) {
                 log.info("FOTA uplink duplicate skipped: messageId={}", envelope.getMessageId());
+                mqttMetrics.uplinkDuplicate("fota");
                 return UplinkResult.success();
             }
             log.error("FOTA uplink digest conflict: messageId={}", envelope.getMessageId());

@@ -28,6 +28,13 @@ public record KeyprovRelayResult(
         return new KeyprovRelayResult(true, null, null, messageId, messageId, null);
     }
 
+    /**
+     * 是否为幂等键判定出的重复上行（delivered 但无下行 Topic）。
+     */
+    public boolean duplicate() {
+        return delivered && errorCode == null && reason == null && downlinkTopic == null;
+    }
+
     public static KeyprovRelayResult fail(KeyprovReason reason) {
         return fail(reason, null);
     }

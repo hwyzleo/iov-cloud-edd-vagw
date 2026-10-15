@@ -5,7 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.hwyz.iov.cloud.edd.vagw.adapter.mqtt.KeyprovMqttIngressAdapter;
 import net.hwyz.iov.cloud.edd.vagw.adapter.mqtt.VehicleMessageUplinkBridge;
-import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
+import net.hwyz.iov.cloud.edd.vagw.service.VagwMqttSubscriptionMetrics;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,10 +15,21 @@ import org.springframework.context.annotation.Lazy;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * VAGW MQTT 客户端与统一上行共享订阅管理（EDD-VAGW-DSN-CR-006 / CR-011 / CR-015）。
+ * <p>
+ * 所有上行订阅统一由 {@link VagwUplinkSubscriptionRegistry} 生成 {@code $share/vagw/{filter}}，
+ * 不再硬编码已废弃的无组名兼容语法或按业务拆分的旧共享组。逐 filter 解析 SUBACK，失败只降级对应
+ * capability，不取消其他 filter、不重建整个客户端；topic segment 分发到各自独立入口 Adapter。
+ * </p>
+ */
 @Slf4j
 @Component
 @RequiredArgsConstructor
@@ -46,11 +57,17 @@ public class MqttClientManager {
     @Lazy
     private KeyprovMqttIngressAdapter keyprovIngressAdapter;
     @Autowired
-    private KeyprovProperties keyprovProperties;
+    @Lazy
+    private VagwUplinkSubscriptionRegistry subscriptionRegistry;
+    @Autowired
+    private VagwMqttSubscriptionMetrics metrics;
+
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
     private MqttClient mqttClient;
-    private volatile boolean running = false;
+
+    /** 已成功 SUBACK 的订阅，按 topic segment 索引；只用于消息分发与拒绝判定。 */
+    private volatile Map<String, VagwUplinkSubscriptionRegistry.ResolvedSubscription> activeBySegment = Map.of();
 
     @EventListener(ApplicationReadyEvent.class)
     public void init() {
@@ -97,10 +114,23 @@ public class MqttClientManager {
             options.setPassword(password != null ? password.toCharArray() : new char[0]);
         }
 
-        mqttClient.setCallback(new MqttCallback() {
+        mqttClient.setCallback(new MqttCallbackExtended() {
+            @Override
+            public void connectComplete(boolean reconnect, String serverURI) {
+                if (reconnect) {
+                    // cleanSession=true 时自动重连不会恢复订阅；重连后按同一 registry 重新订阅
+                    try {
+                        subscribeActive();
+                    } catch (Exception e) {
+                        log.error("MQTT resubscribe after reconnect failed: {}", e.getMessage());
+                    }
+                }
+            }
+
             @Override
             public void connectionLost(Throwable cause) {
-                log.warn("MQTT connection lost: {}", cause.getMessage());
+                activeBySegment = Map.of();
+                log.warn("MQTT connection lost: {}", cause == null ? null : cause.getMessage());
             }
 
             @Override
@@ -115,43 +145,107 @@ public class MqttClientManager {
         });
 
         mqttClient.connect(options);
-        running = true;
+        subscribeActive();
 
-        // FOTA 上行共享订阅收窄到 /up/fota，避免与 keyprov 共享订阅重复投递（EDD-VAGW-DSN-CR-011 §3.1）
-        String fotaUplinkTopic = "$queue/vehicle/+/up/fota";
-        String keyprovUplinkTopic = keyprovProperties.getIngressSharedSubscription();
-        mqttClient.subscribe(new String[]{fotaUplinkTopic, keyprovUplinkTopic},
-                new int[]{1, keyprovProperties.getQos()});
-
-        log.info("MQTT connected and subscribed: broker={}, clientId={}, fotaTopic={}, keyprovTopic={}",
-                brokerUrl, fullClientId, fotaUplinkTopic, keyprovUplinkTopic);
+        log.info("MQTT connected: broker={}, clientId={}", brokerUrl, fullClientId);
     }
 
-    private void handleMessage(String topic, MqttMessage message) {
+    /**
+     * 订阅当前生效的上行 filter（统一 {@code $share/vagw/...}）。逐 filter 解析 SUBACK，
+     * 失败仅降级该 capability，并输出有界原因；不取消其他 filter。
+     */
+    void subscribeActive() throws MqttException {
+        List<VagwUplinkSubscriptionRegistry.ResolvedSubscription> subscriptions =
+                subscriptionRegistry.resolveActive();
+        if (subscriptions.isEmpty()) {
+            activeBySegment = Map.of();
+            log.warn("MQTT uplink subscription set is empty; no subscription created");
+            return;
+        }
+
+        String[] topicFilters = subscriptions.stream()
+                .map(VagwUplinkSubscriptionRegistry.ResolvedSubscription::sharedTopic)
+                .toArray(String[]::new);
+        int[] qos = subscriptions.stream()
+                .mapToInt(VagwUplinkSubscriptionRegistry.ResolvedSubscription::qos)
+                .toArray();
+
+        IMqttToken token;
         try {
-            // Extract device key from topic: vehicle/{device-key}/up/{service}
-            String[] parts = topic.split("/");
-            if (parts.length < 4 || !"vehicle".equals(parts[0]) || !"up".equals(parts[2])) {
-                log.warn("Invalid uplink topic format: {}", topic);
+            token = mqttClient.subscribeWithResponse(topicFilters, qos);
+        } catch (MqttException e) {
+            for (VagwUplinkSubscriptionRegistry.ResolvedSubscription subscription : subscriptions) {
+                metrics.suback(subscription.group(), subscription.service(), "failure");
+                metrics.subscriptionState(subscription.group(), subscription.service(), subscription.filter(), false);
+            }
+            activeBySegment = Map.of();
+            log.error("MQTT subscribe request failed; all uplink capabilities degraded: {}", e.getMessage());
+            return;
+        }
+
+        int[] granted = token == null ? null : token.getGrantedQos();
+        Map<String, VagwUplinkSubscriptionRegistry.ResolvedSubscription> active = new HashMap<>();
+        for (int i = 0; i < subscriptions.size(); i++) {
+            VagwUplinkSubscriptionRegistry.ResolvedSubscription subscription = subscriptions.get(i);
+            int grantedQos = (granted != null && i < granted.length) ? granted[i] : -1;
+            if (grantedQos >= 0 && grantedQos != 0x80) {
+                active.put(subscription.topicSegment(), subscription);
+                metrics.suback(subscription.group(), subscription.service(), "success");
+                metrics.subscriptionState(subscription.group(), subscription.service(), subscription.filter(), true);
+                log.info("VAGW uplink subscription active: group={}, service={}, filter={}, qos={}",
+                        subscription.group(), subscription.service(), subscription.filter(), grantedQos);
+            } else {
+                metrics.suback(subscription.group(), subscription.service(), "failure");
+                metrics.subscriptionState(subscription.group(), subscription.service(), subscription.filter(), false);
+                log.error("VAGW uplink subscription degraded (SUBACK failure): group={}, service={}, filter={}, reason=SUBACK_0x80",
+                        subscription.group(), subscription.service(), subscription.filter());
+            }
+        }
+        activeBySegment = Map.copyOf(active);
+    }
+
+    void handleMessage(String topic, MqttMessage message) {
+        String[] parts = topic == null ? new String[0] : topic.split("/");
+        if (parts.length < 4 || !"vehicle".equals(parts[0]) || !"up".equals(parts[2])) {
+            metrics.uplinkRejected("unknown", "invalid_topic_format");
+            log.warn("Invalid uplink topic format, rejected");
+            return;
+        }
+
+        String segment = parts[3];
+        VagwUplinkSubscriptionRegistry.ResolvedSubscription subscription = activeBySegment.get(segment);
+        if (subscription == null) {
+            metrics.uplinkRejected(segment, "filter_not_subscribed");
+            log.warn("Uplink topic segment not subscribed, rejected: segment={}", segment);
+            return;
+        }
+
+        metrics.uplinkReceived(subscription.group(), subscription.service());
+        metrics.inflight(subscription.service(), 1);
+        try {
+            UplinkSubscriptionHandler handler = handlerForSegment(segment);
+            if (handler == null) {
+                metrics.uplinkRejected(subscription.service(), "no_handler");
+                log.error("No uplink handler bound for segment={}", segment);
                 return;
             }
-
-            String deviceKey = parts[1];
-            String service = parts[3];
-
-            log.debug("Uplink message: topic={}, deviceKey={}, service={}, payloadSize={}",
-                    topic, deviceKey, service, message.getPayload().length);
-
-            // allowlist（EDD-VAGW-DSN-CR-006 §10 / DSN-CR-011 §3.1）：
-            // keyprov 走独立受控入站，fota 与其余交由 FOTA 桥接（非 fota 仍被拒绝），不形成任意隧道
-            if ("keyprov".equals(service)) {
-                keyprovIngressAdapter.handleUplink(topic, message.getPayload());
-            } else {
-                uplinkBridge.handleUplink(topic, message.getPayload());
-            }
+            handler.handleUplink(topic, message.getPayload());
         } catch (Exception e) {
-            log.error("Error handling MQTT message: topic={}", topic, e);
+            metrics.uplinkRejected(subscription.service(), "handler_error");
+            log.error("Error handling MQTT message: service={}", subscription.service(), e);
+        } finally {
+            metrics.inflight(subscription.service(), -1);
         }
+    }
+
+    private UplinkSubscriptionHandler handlerForSegment(String segment) {
+        if (uplinkBridge.topicSegment().equals(segment)) {
+            return uplinkBridge;
+        }
+        if (keyprovIngressAdapter.topicSegment().equals(segment)) {
+            return keyprovIngressAdapter;
+        }
+        return null;
     }
 
     public void publish(String topic, byte[] payload, int qos) throws MqttException {
@@ -166,7 +260,6 @@ public class MqttClientManager {
 
     @PreDestroy
     public void shutdown() {
-        running = false;
         scheduler.shutdown();
         if (mqttClient != null && mqttClient.isConnected()) {
             try {

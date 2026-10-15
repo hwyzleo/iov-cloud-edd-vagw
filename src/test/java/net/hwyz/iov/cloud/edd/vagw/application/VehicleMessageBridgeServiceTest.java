@@ -13,6 +13,7 @@ import net.hwyz.iov.cloud.edd.vagw.service.BindingResolution;
 import net.hwyz.iov.cloud.edd.vagw.service.BindingService;
 import net.hwyz.iov.cloud.edd.vagw.service.InvalidateReason;
 import net.hwyz.iov.cloud.edd.vagw.service.SessionService;
+import net.hwyz.iov.cloud.edd.vagw.service.VagwMqttSubscriptionMetrics;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -55,6 +56,8 @@ class VehicleMessageBridgeServiceTest {
     private VehicleMessageDownlinkPublisher downlinkPublisher;
     @Mock
     private GatewayDeliveryService gatewayDeliveryService;
+    @Mock
+    private VagwMqttSubscriptionMetrics mqttMetrics;
 
     /** 真实路由目录（默认 CR-008 目标 Topic 名），供断言与 RouteEntry 使用 */
     @Spy

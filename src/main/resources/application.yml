@@ -61,7 +61,23 @@ vagw:
       uplink-dlq-topic: vagw.fota.dlq.up
       downlink-dlq-topic: vagw.fota.dlq.down
       downlink-concurrency: 3
+  # 统一 MQTT 上行共享订阅组（EDD-VAGW-DSN-CR-015 §3）：
+  # 所有受治理 service 的显式上行 filter 由 VagwUplinkSubscriptionRegistry 统一生成 $share/vagw/{filter}；
+  # 禁止已废弃的无组名兼容语法与按业务拆分的旧共享组，禁止 vehicle/+/up/+ 或 vehicle/+/up/# 宽泛通配。
+  # enabled 与对应 capability/feature gate 保持一致；共享组只表达部署单元内实例竞争消费，不合并业务链路。
+  mqtt:
+    shared-group: vagw
+    uplink-subscriptions:
+      - service: fota
+        filter: vehicle/+/up/fota
+        qos: 1
+        enabled: ${vagw.fota.enabled:true}
+      - service: security.keyprov
+        filter: vehicle/+/up/keyprov
+        qos: 1
+        enabled: ${vagw.keyprov.enabled:false}
   fota:
+    enabled: true
     protocol-major: 1
     max-envelope-bytes: 262144        # 上限不截断、不自动分片；超限进 DLQ
     max-payload-bytes: 262016
@@ -100,8 +116,6 @@ vagw:
     max-payload-bytes: 16384          # Envelope.payload 上限：超限整体拒绝，不截断/不分片
     max-envelope-bytes: 17408         # 上行原始 Envelope bytes 上限（payload + 结构开销）
     qos: 1
-    # 上行独立共享订阅组；FOTA 订阅已收窄为 $queue/vehicle/+/up/fota，避免重复投递
-    ingress-shared-subscription: "$share/vagw-keyprov/vehicle/+/up/keyprov"
     # VMD relay SPI：默认注入 DisabledVmdKeyProvisioningClient（fail-closed，不直连 KMS）。
     # 待 VMD 正式 CR 提供真实 VmdKeyProvisioningClient Bean 后自动覆盖，无需改动 relay 编排。
   # 认证安全（EDD-VAGW-DSN-CR-009 §2.6/§5/§9 + EDD-VAGW-DSN-CR-010）：VAGW 自身连接超级用户 bypass 四因子配置。
