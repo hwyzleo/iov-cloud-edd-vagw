@@ -4,6 +4,7 @@ import com.google.protobuf.ByteString;
 import lombok.RequiredArgsConstructor;
 import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.BrokerAuthenticatedPublishContext;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import vehicle.common.v1.Envelope;
 
@@ -18,6 +19,7 @@ import java.util.UUID;
  * </p>
  */
 @Component
+@ConditionalOnProperty(prefix = "vagw.keyprov", name = "enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 public class KeyprovEnvelopeFactory {
 

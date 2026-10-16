@@ -15,6 +15,18 @@ spring:
       # FOTA 下行 ConsumerRecord<String, byte[]>
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+  # OpenFeign（Spring Cloud 2022/OpenFeign 4.0）：官方 edd-vmd-api Keyprov Service 专属超时。
+  # EDD-VAGW-DSN-CR-016 §2.4：统一 absolute deadline；不实现 per-client 连接池，
+  # 并发连接上限由 Keyprov bulkhead max-in-flight 约束；loggerLevel 固定 basic，
+  # 禁止 body/FULL 日志，避免 canonical payload 进入日志。
+  cloud:
+    openfeign:
+      client:
+        config:
+          vmdKeyProvisioningService:
+            connectTimeout: 500
+            readTimeout: 2000
+            loggerLevel: basic
 
 # FOTA 透明桥接配置（EDD-VAGW-DSN-CR-006 §5/§10 + EDD-VAGW-DSN-CR-008）
 # VAGW 作为 Producer 的 4 个 Topic：vagw.fota / vagw.fota.delivery / vagw.fota.dlq.up / vagw.fota.dlq.down
@@ -75,7 +87,7 @@ vagw:
       - service: security.keyprov
         filter: vehicle/+/up/keyprov
         qos: 1
-        enabled: ${vagw.keyprov.enabled:false}
+        enabled: ${vagw.keyprov.enabled:true}
   fota:
     enabled: true
     protocol-major: 1
@@ -104,20 +116,33 @@ vagw:
   # 不做长期负缓存（negative-cache-ttl 恒为 0）
   binding:
     cache-ttl-seconds: 300
-  # keyprov 能力与门禁（EDD-VAGW-DSN-CR-011 §4/§10）：量产默认 false。
-  # 关闭或 proto-keyprov 契约不兼容时，VAGW 不授予任何 keyprov ACL，也不受理 keyprov 上行，
-  # 且不影响 FOTA/远控等其他 service；仅当 PAR-PROTO/VAGW/VMD/EMQX/TBOX release-set
-  # 全部兼容后才开启。开启前须完成真实 SUBACK 与 Request/Response、Ack/AckResult、
-  # Status/StatusResponse 端到端测试。
+  # keyprov 能力与门禁（EDD-VAGW-DSN-CR-011，由 EDD-VAGW-DSN-CR-016 增量修订）：量产默认启用。
+  # 显式关闭时不注册 Keyprov ACL／上行 filter／executor／Gateway 调用链，且不影响 FOTA/远控等
+  # 其他 service。enabled=true 时必须存在 edd-vmd-api 官方 VmdKeyProvisioningService
+  # Feign Bean（缺失即 fail-fast，不创建 Disabled Client 或第二套自定义 Feign 契约）。
+  # 容量/deadline/熔断为保守 dev/CI 默认值，生产经环境变量覆盖。
   keyprov:
-    enabled: false
+    enabled: ${VAGW_KEYPROV_ENABLED:true}
     protocol-version: keyprov-v1
     service: security.keyprov
     max-payload-bytes: 16384          # Envelope.payload 上限：超限整体拒绝，不截断/不分片
     max-envelope-bytes: 17408         # 上行原始 Envelope bytes 上限（payload + 结构开销）
     qos: 1
-    # VMD relay SPI：默认注入 DisabledVmdKeyProvisioningClient（fail-closed，不直连 KMS）。
-    # 待 VMD 正式 CR 提供真实 VmdKeyProvisioningClient Bean 后自动覆盖，无需改动 relay 编排。
+    # Keyprov 专属并发与超时策略（CR-016 §2/§4）：不实现 per-client 连接池；
+    # max-in-flight 是并发请求硬上限，底层连接池可共享，但容量/超时/熔断/指标必须隔离。
+    max-in-flight: ${VAGW_KEYPROV_MAX_IN_FLIGHT:32}
+    worker-count: ${VAGW_KEYPROV_WORKER_COUNT:0}       # 0 = 跟随 max-in-flight
+    queue-capacity: ${VAGW_KEYPROV_QUEUE_CAPACITY:0}   # 默认零等待（SynchronousQueue）
+    queue-wait: ${VAGW_KEYPROV_QUEUE_WAIT:0ms}         # 默认不等待，许可耗尽立即拒绝
+    vmd:
+      deadline: ${VAGW_KEYPROV_VMD_DEADLINE:2s}
+    circuit-breaker:
+      enabled: true
+      failure-window: ${VAGW_KEYPROV_CB_FAILURE_WINDOW:30s}
+      open-duration: ${VAGW_KEYPROV_CB_OPEN_DURATION:15s}
+      half-open-probes: ${VAGW_KEYPROV_CB_HALF_OPEN_PROBES:2}
+      minimum-calls: ${VAGW_KEYPROV_CB_MINIMUM_CALLS:5}
+      failure-rate-threshold: ${VAGW_KEYPROV_CB_FAILURE_RATE_THRESHOLD:0.5}
   # 认证安全（EDD-VAGW-DSN-CR-009 §2.6/§5/§9 + EDD-VAGW-DSN-CR-010）：VAGW 自身连接超级用户 bypass 四因子配置。
   # 默认关闭（最安全）：未显式开启并配齐全部因子时，任何连接都不授予 superuser，
   # 也绝不回退到仅凭 clientId 前缀放行（原前缀放行存在外部伪造提权风险，已移除）。

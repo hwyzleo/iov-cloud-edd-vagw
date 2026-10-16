@@ -10,6 +10,7 @@ import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.context.event.EventListener;
@@ -54,8 +55,7 @@ public class MqttClientManager {
     @Lazy
     private VehicleMessageUplinkBridge uplinkBridge;
     @Autowired
-    @Lazy
-    private KeyprovMqttIngressAdapter keyprovIngressAdapter;
+    private ObjectProvider<KeyprovMqttIngressAdapter> keyprovIngressAdapterProvider;
     @Autowired
     @Lazy
     private VagwUplinkSubscriptionRegistry subscriptionRegistry;
@@ -242,7 +242,9 @@ public class MqttClientManager {
         if (uplinkBridge.topicSegment().equals(segment)) {
             return uplinkBridge;
         }
-        if (keyprovIngressAdapter.topicSegment().equals(segment)) {
+        // keyprov 关闭时不创建该 Bean，避免功能关闭后依赖注入失败（EDD-VAGW-DSN-CR-016 §4）
+        KeyprovMqttIngressAdapter keyprovIngressAdapter = keyprovIngressAdapterProvider.getIfAvailable();
+        if (keyprovIngressAdapter != null && keyprovIngressAdapter.topicSegment().equals(segment)) {
             return keyprovIngressAdapter;
         }
         return null;

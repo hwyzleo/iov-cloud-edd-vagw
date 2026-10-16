@@ -2,6 +2,7 @@ package net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov;
 
 import lombok.RequiredArgsConstructor;
 import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.Comparator;
@@ -17,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * </p>
  */
 @Component
+@ConditionalOnProperty(prefix = "vagw.keyprov", name = "enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 public class KeyprovInbox {
 

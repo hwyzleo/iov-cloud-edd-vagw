@@ -10,6 +10,7 @@ import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
@@ -50,11 +51,15 @@ class MqttClientManagerTest {
         keyprovIngressAdapter = mock(KeyprovMqttIngressAdapter.class);
         metrics = new VagwMqttSubscriptionMetrics();
 
+        @SuppressWarnings("unchecked")
+        ObjectProvider<KeyprovMqttIngressAdapter> keyprovProvider = mock(ObjectProvider.class);
+        when(keyprovProvider.getIfAvailable()).thenReturn(keyprovIngressAdapter);
+
         manager = new MqttClientManager();
         ReflectionTestUtils.setField(manager, "mqttClient", mqttClient);
         ReflectionTestUtils.setField(manager, "subscriptionRegistry", subscriptionRegistry);
         ReflectionTestUtils.setField(manager, "uplinkBridge", uplinkBridge);
-        ReflectionTestUtils.setField(manager, "keyprovIngressAdapter", keyprovIngressAdapter);
+        ReflectionTestUtils.setField(manager, "keyprovIngressAdapterProvider", keyprovProvider);
         ReflectionTestUtils.setField(manager, "metrics", metrics);
     }
 

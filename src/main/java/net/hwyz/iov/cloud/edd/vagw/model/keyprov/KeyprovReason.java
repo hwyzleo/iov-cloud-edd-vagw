@@ -29,5 +29,30 @@ public enum KeyprovReason {
     /** MQTT 下行发布失败。 */
     KEYPROV_DOWNLINK_PUBLISH_FAILED,
     /** Topic/会话/Envelope 设备身份不一致（804003）。 */
-    IDENTITY_MISMATCH
+    IDENTITY_MISMATCH,
+    /** Keyprov 并发许可耗尽（有界 bulkhead 饱和），未调用 VMD（EDD-VAGW-DSN-CR-016 §5）。 */
+    KEYPROV_OVERLOADED,
+    /** 专属执行器拒绝提交（容量/线程耗尽），未调用 VMD。 */
+    KEYPROV_EXECUTION_REJECTED,
+    /** Keyprov 专属熔断器 OPEN，快速失败且不占用 HTTP 连接。 */
+    KEYPROV_CIRCUIT_OPEN,
+    /** VMD 连接建立阶段超时（请求未发出，属于依赖不可用）。 */
+    KEYPROV_VMD_TIMEOUT,
+    // ------------------------------------------------------------------
+    // EDD-VAGW-DSN-CR-016（VMD CR059 对齐）：VMD 官方 806xxx 稳定业务 reason 映射
+    // ------------------------------------------------------------------
+    /** VMD 调用方身份未授权（806090）。 */
+    KEYPROV_VMD_CALLER_UNAUTHORIZED,
+    /** 可信设备上下文与 VMD 记录不一致（806091）。 */
+    KEYPROV_IDENTITY_MISMATCH,
+    /** VMD 设备绑定失效或不可用（806092）。 */
+    KEYPROV_BINDING_INVALID,
+    /** VMD 设备证书失效或不可用（806093）。 */
+    KEYPROV_CERTIFICATE_INVALID,
+    /** VMD 请求协议或内容非法（806094）。 */
+    KEYPROV_REQUEST_INVALID,
+    /** VMD 幂等键冲突（806095）。 */
+    KEYPROV_IDEMPOTENCY_CONFLICT,
+    /** VMD 开通批次不存在（806099）。 */
+    KEYPROV_BATCH_NOT_FOUND
 }

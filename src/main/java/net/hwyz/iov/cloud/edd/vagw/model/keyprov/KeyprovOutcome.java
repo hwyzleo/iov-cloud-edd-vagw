@@ -11,5 +11,9 @@ public enum KeyprovOutcome {
     /** VMD 不可达。 */
     UNAVAILABLE,
     /** 结果未知（超时/网络中断，已发送未确认）。 */
-    OUTCOME_UNKNOWN
+    OUTCOME_UNKNOWN,
+    /** VMD 连接建立阶段超时（请求未发出，属于依赖不可用）。 */
+    TIMEOUT,
+    /** Keyprov 专属熔断器 OPEN，快速失败。 */
+    CIRCUIT_OPEN
 }

@@ -7,6 +7,7 @@ import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovContractGuard;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.BrokerAuthenticatedPublishContext;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovMessageType;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovReason;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 import vehicle.common.v1.Envelope;
 
@@ -27,6 +28,7 @@ import static net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovReason.KEYPROV_SE
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(prefix = "vagw.keyprov", name = "enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 public class KeyprovProtocolValidator {
 

@@ -22,6 +22,7 @@
         <protobuf.version>3.25.5</protobuf.version>
         <!-- PAR-PROTO release（EDD-VAGW-DSN-CR-006 锁定） -->
         <par-proto.version>0.0.1-SNAPSHOT</par-proto.version>
+        <edd-vmd-api.version>0.0.1-SNAPSHOT</edd-vmd-api.version>
         <testcontainers.version>1.19.8</testcontainers.version>
     </properties>
 
@@ -91,6 +92,14 @@
             <groupId>net.hwyz.iov.cloud.iov</groupId>
             <artifactId>iov-tsp-api</artifactId>
             <version>0.0.1-SNAPSHOT</version>
+        </dependency>
+        <!-- VMD API: 官方 Keyprov Service Feign 契约（EDD-VAGW-DSN-CR-016 §2.4 / VMD-DSN-CR-059）。
+             VAGW 直接注入官方 VmdKeyProvisioningService（request／ack／status 三端点），本地仅保留 Gateway Port/Adapter；
+             不得依赖 edd-vmd-service 实现，不得复制 Feign 接口、URL、wire DTO 或 fallback。 -->
+        <dependency>
+            <groupId>net.hwyz.iov.cloud.edd</groupId>
+            <artifactId>edd-vmd-api</artifactId>
+            <version>${edd-vmd-api.version}</version>
         </dependency>
         <!-- Test -->
         <dependency>

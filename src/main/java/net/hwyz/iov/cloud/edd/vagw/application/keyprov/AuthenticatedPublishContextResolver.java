@@ -7,6 +7,7 @@ import net.hwyz.iov.cloud.edd.vagw.model.keyprov.BrokerAuthenticatedPublishConte
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovContextSource;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovReason;
 import net.hwyz.iov.cloud.edd.vagw.service.SessionService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -31,6 +32,7 @@ import static net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovReason.KEYPROV_SE
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(prefix = "vagw.keyprov", name = "enabled", havingValue = "true", matchIfMissing = true)
 @RequiredArgsConstructor
 public class AuthenticatedPublishContextResolver {
 
