@@ -79,9 +79,18 @@ public class KeyprovProtocolValidator {
         if (size > properties.getMaxPayloadBytes()) {
             return new Failure(KEYPROV_PAYLOAD_TOO_LARGE, "payload exceeds max size: " + size);
         }
-        if (envelope.hasExpireAtMs() && envelope.getExpireAtMs() > 0
-                && envelope.getExpireAtMs() <= System.currentTimeMillis()) {
-            return new Failure(KEYPROV_MESSAGE_EXPIRED, "message expired (expire_at_ms)");
+        if (envelope.hasExpireAtMs() && envelope.getExpireAtMs() > 0) {
+            long now = System.currentTimeMillis();
+            long expiresAt = envelope.getExpireAtMs();
+            if (expiresAt <= now) {
+                // 只输出非敏感时间差：既证过期程度，又能定位设备时钟偏移 / 陈旧重投
+                // （deviceTimestampSkewMs > 0 表示设备 timestamp_ms 落后于网关时钟；-1 表示未提供）
+                long deviceTimestampSkewMs =
+                        envelope.getTimestampMs() > 0 ? now - envelope.getTimestampMs() : -1L;
+                return new Failure(KEYPROV_MESSAGE_EXPIRED,
+                        "message expired (expire_at_ms), expiredByMs=" + (now - expiresAt)
+                                + ", deviceTimestampSkewMs=" + deviceTimestampSkewMs);
+            }
         }
         int maxId = properties.getIdentifierMaxLength();
         if (isBlank(envelope.getMessageId()) || exceeds(envelope.getMessageId(), maxId)) {

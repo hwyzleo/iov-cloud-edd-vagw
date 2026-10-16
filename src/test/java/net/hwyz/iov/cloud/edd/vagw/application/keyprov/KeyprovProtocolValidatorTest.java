@@ -120,6 +120,23 @@ class KeyprovProtocolValidatorTest {
     }
 
     @Test
+    void validateUplink_expired_shouldReportNonSensitiveTimingSkew() {
+        long deviceTimestamp = System.currentTimeMillis() - 120_000;
+        Envelope.VehicleMessageEnvelope envelope = baseEnvelope()
+                .setTimestampMs(deviceTimestamp)
+                .setExpireAtMs(deviceTimestamp + 11_000)
+                .build();
+
+        KeyprovProtocolValidator.Failure failure =
+                validator.validateUplink(envelope, envelope.toByteArray(), context());
+
+        assertEquals(KeyprovReason.KEYPROV_MESSAGE_EXPIRED, failure.reason());
+        assertTrue(failure.message().contains("expiredByMs="), failure.message());
+        assertTrue(failure.message().contains("deviceTimestampSkewMs="), failure.message());
+        assertTrue(failure.message().contains("deviceTimestampSkewMs=1"), failure.message());
+    }
+
+    @Test
     void validateUplink_futureExpiry_shouldPass() {
         Envelope.VehicleMessageEnvelope envelope =
                 baseEnvelope().setExpireAtMs(System.currentTimeMillis() + 60_000).build();
