@@ -1,5 +1,6 @@
 package net.hwyz.iov.cloud.edd.vagw.infrastructure.client;
 
+import feign.FeignException;
 import net.hwyz.iov.cloud.edd.vagw.application.keyprov.VmdKeyProvisioningCommand;
 import net.hwyz.iov.cloud.edd.vagw.application.keyprov.VmdRelayResult;
 import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
@@ -179,6 +180,28 @@ class VmdKeyProvisioningGatewayAdapterTest {
                 .outcome(VmdKeyProvisioningOutcome.valueOf(expectedOutcome.name()))
                 .error(VmdKeyProvisioningError.builder().code(code).retryable(false).build())
                 .build());
+
+        VmdRelayResult result = adapter.relay(command(REQ_TYPE));
+
+        assertEquals(expectedOutcome, result.outcome());
+        assertEquals(expectedReason, result.reason());
+        assertFalse(result.hasPayload());
+    }
+
+    @ParameterizedTest(name = "Feign HTTP {0} -> {1}")
+    @CsvSource({
+            // 端点/方法未注册属于依赖能力不可用，不是设备业务拒绝
+            "404, KEYPROV_VMD_UNAVAILABLE, UNAVAILABLE",
+            "405, KEYPROV_VMD_UNAVAILABLE, UNAVAILABLE",
+            "503, KEYPROV_VMD_UNAVAILABLE, UNAVAILABLE",
+            // 其余 4xx 仍为业务拒绝
+            "400, KEYPROV_VMD_REJECTED, REJECTED"
+    })
+    void feignHttpStatus_shouldDistinguishCapabilityUnavailableFromBusinessRejection(
+            int status, KeyprovReason expectedReason, KeyprovOutcome expectedOutcome) {
+        FeignException feignException = mock(FeignException.class);
+        when(feignException.status()).thenReturn(status);
+        when(vmdService.request(any())).thenThrow(feignException);
 
         VmdRelayResult result = adapter.relay(command(REQ_TYPE));
 

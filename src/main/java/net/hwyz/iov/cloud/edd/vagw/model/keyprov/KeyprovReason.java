@@ -22,7 +22,7 @@ public enum KeyprovReason {
     KEYPROV_SESSION_STALE,
     /** VMD 明确拒绝且未返回 canonical 下行 payload。 */
     KEYPROV_VMD_REJECTED,
-    /** VMD 不可达（超时/连接失败/熔断）。 */
+    /** VMD 不可达（超时/连接失败/熔断），或端点未部署/未启用（HTTP 404/405）。 */
     KEYPROV_VMD_UNAVAILABLE,
     /** VMD 结果未知（已发送未收到确定结果）；不得自动更换 requestId 重试。 */
     KEYPROV_OUTCOME_UNKNOWN,

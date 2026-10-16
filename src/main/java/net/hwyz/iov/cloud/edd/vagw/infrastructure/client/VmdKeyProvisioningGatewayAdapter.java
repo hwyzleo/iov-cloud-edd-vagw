@@ -246,10 +246,16 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
             return VmdRelayResult.outcomeUnknown(null, KeyprovReason.KEYPROV_OUTCOME_UNKNOWN);
         }
         if (throwable instanceof FeignException feignException) {
-            if (feignException.status() >= 500) {
+            int status = feignException.status();
+            // 404/405：目标端点未注册或方法不支持（VMD Keyprov 能力未部署/未启用），
+            // 属于依赖能力不可用而非业务拒绝，按 UNAVAILABLE 上报并计入熔断，避免误判为设备业务失败。
+            if (status == 404 || status == 405) {
                 return VmdRelayResult.unavailable(KeyprovReason.KEYPROV_VMD_UNAVAILABLE);
             }
-            if (feignException.status() >= 400) {
+            if (status >= 500) {
+                return VmdRelayResult.unavailable(KeyprovReason.KEYPROV_VMD_UNAVAILABLE);
+            }
+            if (status >= 400) {
                 return VmdRelayResult.rejected(null, KeyprovReason.KEYPROV_VMD_REJECTED);
             }
         }
