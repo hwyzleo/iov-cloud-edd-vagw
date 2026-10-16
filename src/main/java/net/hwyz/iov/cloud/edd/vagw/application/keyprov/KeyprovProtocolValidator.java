@@ -13,6 +13,7 @@ import vehicle.common.v1.Envelope;
 
 import java.util.Optional;
 
+import static net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovReason.KEYPROV_MESSAGE_EXPIRED;
 import static net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovReason.KEYPROV_PAYLOAD_INVALID;
 import static net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovReason.KEYPROV_PAYLOAD_TOO_LARGE;
 import static net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovReason.KEYPROV_PROTOCOL_UNSUPPORTED;
@@ -80,7 +81,7 @@ public class KeyprovProtocolValidator {
         }
         if (envelope.hasExpireAtMs() && envelope.getExpireAtMs() > 0
                 && envelope.getExpireAtMs() <= System.currentTimeMillis()) {
-            return new Failure(KEYPROV_PROTOCOL_UNSUPPORTED, "message expired (expire_at_ms)");
+            return new Failure(KEYPROV_MESSAGE_EXPIRED, "message expired (expire_at_ms)");
         }
         int maxId = properties.getIdentifierMaxLength();
         if (isBlank(envelope.getMessageId()) || exceeds(envelope.getMessageId(), maxId)) {

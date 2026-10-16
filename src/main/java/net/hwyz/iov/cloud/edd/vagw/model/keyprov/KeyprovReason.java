@@ -16,6 +16,8 @@ public enum KeyprovReason {
     KEYPROV_PAYLOAD_INVALID,
     /** payload 超过 16 KiB。 */
     KEYPROV_PAYLOAD_TOO_LARGE,
+    /** 上行 Envelope 的 expire_at_ms 已过期（TTL 超时，未进入 VMD 调用）。 */
+    KEYPROV_MESSAGE_EXPIRED,
     /** 会话/认证上下文缺失（无活动会话或无法关联认证身份）。 */
     KEYPROV_SESSION_CONTEXT_MISSING,
     /** 会话已失效或 connection generation 过期。 */

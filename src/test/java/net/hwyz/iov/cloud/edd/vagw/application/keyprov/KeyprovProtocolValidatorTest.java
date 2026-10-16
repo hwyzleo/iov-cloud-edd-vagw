@@ -112,11 +112,18 @@ class KeyprovProtocolValidatorTest {
     }
 
     @Test
-    void validateUplink_expired_shouldReject() {
+    void validateUplink_expired_shouldRejectAsMessageExpired() {
         Envelope.VehicleMessageEnvelope envelope =
                 baseEnvelope().setExpireAtMs(System.currentTimeMillis() - 1000).build();
-        assertEquals(KeyprovReason.KEYPROV_PROTOCOL_UNSUPPORTED,
+        assertEquals(KeyprovReason.KEYPROV_MESSAGE_EXPIRED,
                 validator.validateUplink(envelope, envelope.toByteArray(), context()).reason());
+    }
+
+    @Test
+    void validateUplink_futureExpiry_shouldPass() {
+        Envelope.VehicleMessageEnvelope envelope =
+                baseEnvelope().setExpireAtMs(System.currentTimeMillis() + 60_000).build();
+        assertNull(validator.validateUplink(envelope, envelope.toByteArray(), context()));
     }
 
     @Test
