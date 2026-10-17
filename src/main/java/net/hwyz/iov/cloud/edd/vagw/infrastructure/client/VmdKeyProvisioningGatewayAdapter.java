@@ -128,6 +128,12 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
         String schemaVersion = command.envelope().getProtocolVersion();
         byte[] payload = command.canonicalPayload();
         String digest = sha256(payload);
+        // 诊断：仅输出非敏感协议参数与摘要指纹，便于与 VMD 门禁日志逐项比对（不输出 payload 本体）
+        if (log.isDebugEnabled()) {
+            log.debug("Keyprov VMD 调用参数: type={}, payloadType={}, schemaVersion={}, payloadBytes={}, digest={}",
+                    type, payloadType, schemaVersion, payload == null ? 0 : payload.length,
+                    digestFingerprint(digest));
+        }
         return switch (type) {
             case KEY_PROVISIONING_REQUEST -> mapResponse(vmdService.request(VmdKeyProvisioningRequest.builder()
                     .deviceContext(context).payloadType(payloadType).schemaVersion(schemaVersion)
@@ -156,7 +162,7 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
                 .build();
     }
 
-    private static VmdRelayResult mapResponse(VmdKeyProvisioningResponse response) {
+    private VmdRelayResult mapResponse(VmdKeyProvisioningResponse response) {
         if (response == null) {
             return VmdRelayResult.unavailable(KeyprovReason.KEYPROV_VMD_UNAVAILABLE);
         }
@@ -164,7 +170,7 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
                 response.getExpireAtMs(), response.getOutcome(), response.getError());
     }
 
-    private static VmdRelayResult mapAck(VmdKeyProvisioningAckResult result) {
+    private VmdRelayResult mapAck(VmdKeyProvisioningAckResult result) {
         if (result == null) {
             return VmdRelayResult.unavailable(KeyprovReason.KEYPROV_VMD_UNAVAILABLE);
         }
@@ -172,7 +178,7 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
                 null, result.getOutcome(), result.getError());
     }
 
-    private static VmdRelayResult mapStatus(VmdKeyProvisioningStatusResponse response) {
+    private VmdRelayResult mapStatus(VmdKeyProvisioningStatusResponse response) {
         if (response == null) {
             return VmdRelayResult.unavailable(KeyprovReason.KEYPROV_VMD_UNAVAILABLE);
         }
@@ -180,16 +186,26 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
                 null, response.getOutcome(), response.getError());
     }
 
-    private static VmdRelayResult toResult(String requestId, String payloadType, byte[] payloadBytes,
-                                           Long expireAtMs, VmdKeyProvisioningOutcome outcome,
-                                           VmdKeyProvisioningError error) {
+    private VmdRelayResult toResult(String requestId, String payloadType, byte[] payloadBytes,
+                                    Long expireAtMs, VmdKeyProvisioningOutcome outcome,
+                                    VmdKeyProvisioningError error) {
         if (outcome == VmdKeyProvisioningOutcome.SUCCESS) {
             if (payloadType == null || payloadType.isBlank() || payloadBytes == null) {
+                log.warn("Keyprov VMD 返回 SUCCESS 但缺少 canonical payload: requestId={}, payloadType={}, payloadBytes={}",
+                        requestId, payloadType, payloadBytes == null ? 0 : payloadBytes.length);
                 return VmdRelayResult.unavailable(KeyprovReason.KEYPROV_VMD_UNAVAILABLE);
             }
             return new VmdRelayResult(requestId, payloadType, payloadBytes, expireAtMs,
                     KeyprovOutcome.SUCCESS, null);
         }
+        // 诊断：VAGW 对外只上报稳定 reason，这里额外保留 VMD 登记的 806xxx 与脱敏 message，
+        // 便于按 requestId 与 VMD 侧日志关联定位（不含 payload / Wrapped Key）
+        log.warn("Keyprov VMD 返回非成功: requestId={}, outcome={}, code={}, retryable={}, action={}, message={}",
+                requestId, outcome,
+                error == null ? null : error.getCode(),
+                error == null ? null : error.isRetryable(),
+                error == null ? null : error.getAction(),
+                error == null ? null : error.getMessage());
         KeyprovReason reason = mapReason(outcome, error);
         if (outcome == VmdKeyProvisioningOutcome.OUTCOME_UNKNOWN) {
             return VmdRelayResult.outcomeUnknown(requestId, reason);
@@ -318,6 +334,17 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
             // SHA-256 必然可用；退化用长度避免 NPE（不输出内容）
             return "len:" + (bytes == null ? 0 : bytes.length);
         }
+    }
+
+    /**
+     * 摘要指纹：仅保留前 16 位便于端到端比对，属不可逆哈希。
+     */
+    private static String digestFingerprint(String digest) {
+        if (digest == null || digest.isBlank()) {
+            return "<missing>";
+        }
+        String value = digest.trim();
+        return value.length() <= 16 ? value : value.substring(0, 16) + "…(len=" + value.length() + ")";
     }
 
     private static long elapsedMillis(long startedAt) {
