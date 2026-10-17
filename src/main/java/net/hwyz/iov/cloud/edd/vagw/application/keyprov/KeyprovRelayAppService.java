@@ -148,8 +148,8 @@ public class KeyprovRelayAppService {
             return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_DOWNLINK_PUBLISH_FAILED, uplink.getMessageId());
         }
 
-        log.info("keyprov relayed: requestId={}, messageId={}, uplinkType={}, downlinkType={}, payloadBytes={}",
-                uplink.getRequestId(), uplink.getMessageId(),
+        log.info("keyprov relayed: requestId={}, messageId={}, outcome={}, uplinkType={}, downlinkType={}, payloadBytes={}",
+                uplink.getRequestId(), uplink.getMessageId(), response.outcome(),
                 LogMask.maskPayloadType(uplink.getPayloadType()),
                 LogMask.maskPayloadType(response.downlinkPayloadType()),
                 response.downlinkPayload() == null ? 0 : response.downlinkPayload().length);

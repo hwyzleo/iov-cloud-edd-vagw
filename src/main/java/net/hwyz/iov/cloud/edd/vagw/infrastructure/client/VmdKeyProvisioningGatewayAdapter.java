@@ -207,13 +207,33 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
                 error == null ? null : error.getAction(),
                 error == null ? null : error.getMessage());
         KeyprovReason reason = mapReason(outcome, error);
-        if (outcome == VmdKeyProvisioningOutcome.OUTCOME_UNKNOWN) {
+        KeyprovOutcome relayOutcome = toRelayOutcome(outcome);
+        // VMD 在非成功结果上同样返回 canonical 下行 payload（ProtocolError）：VAGW 原样转发，
+        // 车端据 result/error.retryable 收敛（BLOCKED 或按原 requestId 重试），不再盲重投
+        if (payloadType != null && !payloadType.isBlank() && payloadBytes != null) {
+            log.info("Keyprov VMD 非成功但返回 canonical 下行 payload: requestId={}, outcome={}, downlinkPayloadType={}, payloadBytes={}",
+                    requestId, relayOutcome, payloadType, payloadBytes.length);
+            return new VmdRelayResult(requestId, payloadType, payloadBytes, expireAtMs, relayOutcome, reason);
+        }
+        if (relayOutcome == KeyprovOutcome.OUTCOME_UNKNOWN) {
             return VmdRelayResult.outcomeUnknown(requestId, reason);
         }
-        if (outcome == VmdKeyProvisioningOutcome.REJECTED) {
+        if (relayOutcome == KeyprovOutcome.REJECTED) {
             return VmdRelayResult.rejected(requestId, reason);
         }
         return VmdRelayResult.unavailable(reason);
+    }
+
+    private static KeyprovOutcome toRelayOutcome(VmdKeyProvisioningOutcome outcome) {
+        if (outcome == null) {
+            return KeyprovOutcome.UNAVAILABLE;
+        }
+        return switch (outcome) {
+            case SUCCESS -> KeyprovOutcome.SUCCESS;
+            case REJECTED -> KeyprovOutcome.REJECTED;
+            case OUTCOME_UNKNOWN -> KeyprovOutcome.OUTCOME_UNKNOWN;
+            case UNAVAILABLE -> KeyprovOutcome.UNAVAILABLE;
+        };
     }
 
     /**

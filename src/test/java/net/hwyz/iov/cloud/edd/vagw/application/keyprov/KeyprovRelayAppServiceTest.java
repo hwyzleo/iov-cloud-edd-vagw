@@ -233,6 +233,28 @@ class KeyprovRelayAppServiceTest {
     }
 
     @Test
+    void relay_vmdRejectedWithCanonicalPayload_shouldPublishDownlink() throws Exception {
+        when(contractGuard.compatible()).thenReturn(true);
+        when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
+        byte[] rejectPayload = new byte[]{11, 12};
+        when(vmdGateway.relay(any())).thenReturn(new VmdRelayResult("req-001", RESP_TYPE, rejectPayload,
+                null, KeyprovOutcome.REJECTED, KeyprovReason.KEYPROV_REQUEST_INVALID));
+        when(protocolValidator.isAllowedDownlinkPayloadType(RESP_TYPE)).thenReturn(true);
+        when(sessionService.isGenerationCurrent("DEVICE001", 3L)).thenReturn(true);
+        when(envelopeFactory.buildDownlink(any(), any(), eq(RESP_TYPE), eq(rejectPayload), any()))
+                .thenReturn(uplink());
+        when(downlinkPublisher.publish(eq("DEVICE001"), any(byte[].class)))
+                .thenReturn("vehicle/DEVICE001/down/keyprov");
+
+        KeyprovRelayResult result = service.relay(context(), uplink(), uplink().toByteArray());
+
+        // VMD 显式拒绝且返回 canonical ProtocolError：必须下发，车端据 error.retryable 收敛（不再盲重投）
+        assertTrue(result.delivered());
+        assertEquals("vehicle/DEVICE001/down/keyprov", result.downlinkTopic());
+        verify(downlinkPublisher).publish(eq("DEVICE001"), any(byte[].class));
+    }
+
+    @Test
     void relay_vmdUnavailable_shouldFailClosed() {
         when(contractGuard.compatible()).thenReturn(true);
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);

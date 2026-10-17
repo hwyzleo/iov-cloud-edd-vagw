@@ -247,6 +247,55 @@ class VmdKeyProvisioningGatewayAdapterTest {
                 "业务拒绝不得计入依赖故障率");
     }
 
+    @ParameterizedTest(name = "VMD {0} + canonical payload -> 原样转发")
+    @CsvSource({
+            "806094, KEYPROV_REQUEST_INVALID, REJECTED",
+            "806096, KEYPROV_VMD_UNAVAILABLE, UNAVAILABLE",
+            "806098, KEYPROV_OUTCOME_UNKNOWN, OUTCOME_UNKNOWN"
+    })
+    void nonSuccessWithCanonicalPayload_shouldRelayDownlinkInsteadOfDropping(
+            String code, KeyprovReason expectedReason, KeyprovOutcome expectedOutcome) {
+        byte[] downlink = new byte[]{1, 2, 3, 4};
+        when(vmdService.request(any())).thenReturn(VmdKeyProvisioningResponse.builder()
+                .requestId("r1")
+                .payloadType(RESP_TYPE)
+                .payloadBytes(downlink)
+                .payloadDigest("d")
+                .outcome(VmdKeyProvisioningOutcome.valueOf(expectedOutcome.name()))
+                .error(VmdKeyProvisioningError.builder().code(code).retryable(false).build())
+                .build());
+
+        VmdRelayResult result = adapter.relay(command(REQ_TYPE));
+
+        // 非成功但带 canonical payload：VAGW 必须原样转发，否则车端收不到拒绝、只能盲重投
+        assertTrue(result.hasPayload());
+        assertEquals(expectedOutcome, result.outcome());
+        assertEquals(expectedReason, result.reason());
+        assertEquals(RESP_TYPE, result.downlinkPayloadType());
+        assertArrayEquals(downlink, result.downlinkPayload());
+    }
+
+    @Test
+    void businessRejectionWithPayload_shouldStillNotCountAsDependencyFailure() {
+        properties.getCircuitBreaker().setEnabled(true);
+        properties.getCircuitBreaker().setMinimumCalls(1);
+        properties.getCircuitBreaker().setFailureRateThreshold(1.0d);
+        KeyprovCircuitBreaker breaker = new KeyprovCircuitBreaker(properties, metrics);
+        VmdKeyProvisioningGatewayAdapter guarded =
+                new VmdKeyProvisioningGatewayAdapter(vmdService, properties, breaker, metrics);
+
+        when(vmdService.request(any())).thenReturn(VmdKeyProvisioningResponse.builder()
+                .requestId("r1").payloadType(RESP_TYPE).payloadBytes(new byte[]{1})
+                .outcome(VmdKeyProvisioningOutcome.REJECTED)
+                .error(VmdKeyProvisioningError.builder().code("806094").build()).build());
+        VmdRelayResult result = guarded.relay(command(REQ_TYPE));
+
+        assertTrue(result.hasPayload());
+        assertEquals(KeyprovOutcome.REJECTED, result.outcome());
+        assertEquals(KeyprovCircuitBreaker.State.CLOSED, breaker.state(),
+                "带 payload 的业务拒绝同样不得计入依赖故障率");
+    }
+
     @Test
     void connectFailureBeforeSend_shouldRetryOnceWithinDeadline() {
         when(vmdService.request(any()))
