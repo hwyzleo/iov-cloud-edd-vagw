@@ -8,7 +8,6 @@ import net.hwyz.iov.cloud.edd.vagw.application.keyprov.KeyprovRelayAppService;
 import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.LogMask;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovAdmissionBulkhead;
-import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovContractGuard;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovExecutor;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.BrokerAuthenticatedPublishContext;
 import net.hwyz.iov.cloud.edd.vagw.mqtt.UplinkSubscriptionHandler;
@@ -41,7 +40,6 @@ public class KeyprovMqttIngressAdapter implements UplinkSubscriptionHandler {
     public static final String SERVICE = "security.keyprov";
 
     private final KeyprovProperties properties;
-    private final KeyprovContractGuard contractGuard;
     private final KeyprovProtocolValidator protocolValidator;
     private final AuthenticatedPublishContextResolver contextResolver;
     private final KeyprovAdmissionBulkhead bulkhead;
@@ -74,12 +72,6 @@ public class KeyprovMqttIngressAdapter implements UplinkSubscriptionHandler {
             // disabled 时不应获授 keyprov ACL；此处仍 fail-closed，仅审计
             metrics.uplinkRejected(SERVICE, "keyprov_disabled");
             log.warn("keyprov uplink rejected: KEYPROV_DISABLED, hsmUid={}", LogMask.mask(topicHsmUid));
-            return;
-        }
-        if (!contractGuard.compatible()) {
-            metrics.uplinkRejected(SERVICE, "keyprov_protocol_unsupported");
-            log.warn("keyprov uplink rejected: KEYPROV_PROTOCOL_UNSUPPORTED (contract incompatible), hsmUid={}",
-                    LogMask.mask(topicHsmUid));
             return;
         }
         if (payload == null || payload.length == 0 || payload.length > properties.getMaxEnvelopeBytes()) {

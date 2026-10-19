@@ -195,7 +195,7 @@ public class AuthAclServiceImpl implements AuthAclService {
             rules.add(aclRule("publish", TOPIC_PREFIX + deviceSn + "/up/" + service));
             rules.add(aclRule("subscribe", TOPIC_PREFIX + deviceSn + "/down/" + service));
         }
-        if (keyprovProperties.isEnabled() && keyprovContractGuard.compatible()) {
+        if (keyprovProperties.isEnabled() && keyprovContractGuard.statusPathAvailable()) {
             rules.add(aclRule("publish", TOPIC_PREFIX + deviceSn + "/up/keyprov"));
             rules.add(aclRule("subscribe", TOPIC_PREFIX + deviceSn + "/down/keyprov"));
         }

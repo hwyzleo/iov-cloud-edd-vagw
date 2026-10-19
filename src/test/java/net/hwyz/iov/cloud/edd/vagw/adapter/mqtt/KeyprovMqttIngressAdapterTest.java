@@ -5,7 +5,6 @@ import net.hwyz.iov.cloud.edd.vagw.application.keyprov.KeyprovProtocolValidator;
 import net.hwyz.iov.cloud.edd.vagw.application.keyprov.KeyprovRelayAppService;
 import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovAdmissionBulkhead;
-import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovContractGuard;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovExecutor;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.BrokerAuthenticatedPublishContext;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovContextSource;
@@ -39,8 +38,6 @@ import static org.mockito.Mockito.*;
 class KeyprovMqttIngressAdapterTest {
 
     @Mock
-    private KeyprovContractGuard contractGuard;
-    @Mock
     private KeyprovProtocolValidator protocolValidator;
     @Mock
     private AuthenticatedPublishContextResolver contextResolver;
@@ -61,7 +58,7 @@ class KeyprovMqttIngressAdapterTest {
         KeyprovMetrics metrics = new KeyprovMetrics();
         bulkhead = new KeyprovAdmissionBulkhead(properties, metrics);
         executor = new KeyprovExecutor(properties, metrics);
-        adapter = new KeyprovMqttIngressAdapter(properties, contractGuard, protocolValidator, contextResolver,
+        adapter = new KeyprovMqttIngressAdapter(properties, protocolValidator, contextResolver,
                 bulkhead, executor, relayService, new VagwMqttSubscriptionMetrics());
     }
 
@@ -110,10 +107,16 @@ class KeyprovMqttIngressAdapterTest {
     }
 
     @Test
-    void handleUplink_contractIncompatible_shouldNotRelay() {
-        when(contractGuard.compatible()).thenReturn(false);
+    void handleUplink_readinessNotReady_shouldNotSubmit() {
+        when(contextResolver.resolve(eq("DEVICE001"), any()))
+                .thenReturn(AuthenticatedPublishContextResolver.Resolution.ok(context()));
+        when(protocolValidator.validateUplink(any(), any(), any())).thenReturn(
+                new KeyprovProtocolValidator.Failure(
+                        KeyprovReason.KEYPROV_CONTRACT_RELEASE_MISMATCH, "not ready"));
+
         adapter.handleUplink("vehicle/DEVICE001/up/keyprov", validEnvelope());
-        verifyNoInteractions(relayService, contextResolver, protocolValidator);
+
+        verifyNoInteractions(relayService);
     }
 
     @Test
@@ -130,7 +133,6 @@ class KeyprovMqttIngressAdapterTest {
 
     @Test
     void handleUplink_contextMissing_shouldNotRelay() {
-        when(contractGuard.compatible()).thenReturn(true);
         when(contextResolver.resolve(eq("DEVICE001"), any()))
                 .thenReturn(AuthenticatedPublishContextResolver.Resolution.fail(
                         KeyprovReason.KEYPROV_SESSION_CONTEXT_MISSING));
@@ -142,7 +144,6 @@ class KeyprovMqttIngressAdapterTest {
 
     @Test
     void handleUplink_protocolRejected_shouldNotSubmit() {
-        when(contractGuard.compatible()).thenReturn(true);
         when(contextResolver.resolve(eq("DEVICE001"), any()))
                 .thenReturn(AuthenticatedPublishContextResolver.Resolution.ok(context()));
         when(protocolValidator.validateUplink(any(), any(), any()))
@@ -155,7 +156,6 @@ class KeyprovMqttIngressAdapterTest {
 
     @Test
     void handleUplink_valid_shouldSubmitAndReturnWithoutWaiting() throws Exception {
-        when(contractGuard.compatible()).thenReturn(true);
         when(contextResolver.resolve(eq("DEVICE001"), any()))
                 .thenReturn(AuthenticatedPublishContextResolver.Resolution.ok(context()));
         when(protocolValidator.validateUplink(any(), any(), any())).thenReturn(null);
@@ -171,7 +171,6 @@ class KeyprovMqttIngressAdapterTest {
 
     @Test
     void handleUplink_bulkheadSaturated_shouldRejectImmediatelyWithoutSubmitting() {
-        when(contractGuard.compatible()).thenReturn(true);
         when(contextResolver.resolve(eq("DEVICE001"), any()))
                 .thenReturn(AuthenticatedPublishContextResolver.Resolution.ok(context()));
         when(protocolValidator.validateUplink(any(), any(), any())).thenReturn(null);

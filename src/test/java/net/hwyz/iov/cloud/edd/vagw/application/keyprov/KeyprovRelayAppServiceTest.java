@@ -6,6 +6,7 @@ import net.hwyz.iov.cloud.edd.vagw.application.keyprov.VmdKeyProvisioningGateway
 import net.hwyz.iov.cloud.edd.vagw.service.KeyprovMetrics;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovContractGuard;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovInbox;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovReadiness;
 import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.BrokerAuthenticatedPublishContext;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovContextSource;
@@ -65,6 +66,11 @@ class KeyprovRelayAppServiceTest {
                 vmdGateway, envelopeFactory, downlinkPublisher, sessionService, metrics);
     }
 
+    private static KeyprovReadiness readyReadiness() {
+        return new KeyprovReadiness(true, null, null,
+                true, true, true, true, true, true, true, true, true);
+    }
+
     private BrokerAuthenticatedPublishContext context() {
         return new BrokerAuthenticatedPublishContext(KeyprovContextSource.ACL_SESSION_CORRELATED,
                 "DEVICE001", "client001", "cert-1", null, 3L, "client001", Instant.now());
@@ -86,7 +92,7 @@ class KeyprovRelayAppServiceTest {
     private void stubDeliveryPath(String downlinkType, byte[] payload) {
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
         when(vmdGateway.relay(any())).thenReturn(new VmdRelayResult("req-001", downlinkType, payload,
-                123L, KeyprovOutcome.SUCCESS, null));
+                123L, KeyprovOutcome.SUCCESS, null, false));
         when(protocolValidator.isAllowedDownlinkPayloadType(downlinkType)).thenReturn(true);
         when(sessionService.isGenerationCurrent("DEVICE001", 3L)).thenReturn(true);
         when(envelopeFactory.buildDownlink(any(), any(), eq(downlinkType), eq(payload), eq(123L)))
@@ -111,8 +117,9 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_contractIncompatible_shouldFailClosedWithoutVmd() {
-        when(contractGuard.compatible()).thenReturn(false);
-        when(contractGuard.incompatibilityReason()).thenReturn("drift");
+        when(contractGuard.readiness()).thenReturn(new KeyprovReadiness(false,
+                KeyprovReason.KEYPROV_PROTOCOL_UNSUPPORTED, "drift",
+                false, false, false, false, false, false, false, false, false));
 
         KeyprovRelayResult result = service.relay(context(), uplink(), uplink().toByteArray());
 
@@ -123,7 +130,7 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_validatorFailure_shouldNotCallVmd() {
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(protocolValidator.validateUplink(any(), any(), any()))
                 .thenReturn(new KeyprovProtocolValidator.Failure(KeyprovReason.KEYPROV_PAYLOAD_INVALID, "bad"));
 
@@ -137,7 +144,7 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_identityMismatch_shouldMapTo804003() {
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(protocolValidator.validateUplink(any(), any(), any()))
                 .thenReturn(new KeyprovProtocolValidator.Failure(KeyprovReason.IDENTITY_MISMATCH, "mismatch"));
 
@@ -150,7 +157,7 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_duplicateMessage_shouldSkipVmd() {
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.DUPLICATE);
 
         KeyprovRelayResult result = service.relay(context(), uplink(), uplink().toByteArray());
@@ -161,7 +168,7 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_digestConflict_shouldFailClosed() {
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.CONFLICT);
 
         KeyprovRelayResult result = service.relay(context(), uplink(), uplink().toByteArray());
@@ -173,7 +180,7 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_requestToResponse_shouldPublishDownlink() throws Exception {
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.readiness()).thenReturn(readyReadiness());
         stubDeliveryPath(RESP_TYPE, new byte[]{9, 9});
 
         KeyprovRelayResult result = service.relay(context(), uplink(), uplink().toByteArray());
@@ -185,7 +192,7 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_ackToAckResult_shouldPublishDownlink() throws Exception {
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.readiness()).thenReturn(readyReadiness());
         Envelope.VehicleMessageEnvelope ack = Envelope.VehicleMessageEnvelope.newBuilder()
                 .setService("security.keyprov").setProtocolVersion("keyprov-v1")
                 .setMessageKind(Envelope.MessageKind.MESSAGE_KIND_REQUEST)
@@ -194,7 +201,7 @@ class KeyprovRelayAppServiceTest {
                 .setPayload(com.google.protobuf.ByteString.copyFrom(new byte[]{1})).build();
         when(inbox.record(eq("ack-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
         when(vmdGateway.relay(any())).thenReturn(new VmdRelayResult("req-001", ACK_RESULT_TYPE,
-                new byte[]{7}, null, KeyprovOutcome.SUCCESS, null));
+                new byte[]{7}, null, KeyprovOutcome.SUCCESS, null, false));
         when(protocolValidator.isAllowedDownlinkPayloadType(ACK_RESULT_TYPE)).thenReturn(true);
         when(sessionService.isGenerationCurrent("DEVICE001", 3L)).thenReturn(true);
         when(envelopeFactory.buildDownlink(any(), any(), eq(ACK_RESULT_TYPE), any(), any())).thenReturn(ack);
@@ -208,10 +215,10 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_wrongDownlinkType_shouldFailClosedAndNotPublish() throws Exception {
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
         when(vmdGateway.relay(any())).thenReturn(new VmdRelayResult("req-001", ACK_RESULT_TYPE, new byte[]{9},
-                123L, KeyprovOutcome.SUCCESS, null));
+                123L, KeyprovOutcome.SUCCESS, null, false));
 
         KeyprovRelayResult result = service.relay(context(), uplink(), uplink().toByteArray());
 
@@ -222,7 +229,7 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_vmdRejectedNoPayload_shouldFailWithRejected() {
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
         when(vmdGateway.relay(any())).thenReturn(VmdRelayResult.rejected("req-001", KeyprovReason.KEYPROV_VMD_REJECTED));
 
@@ -234,11 +241,11 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_vmdRejectedWithCanonicalPayload_shouldPublishDownlink() throws Exception {
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
         byte[] rejectPayload = new byte[]{11, 12};
         when(vmdGateway.relay(any())).thenReturn(new VmdRelayResult("req-001", RESP_TYPE, rejectPayload,
-                null, KeyprovOutcome.REJECTED, KeyprovReason.KEYPROV_REQUEST_INVALID));
+                null, KeyprovOutcome.REJECTED, KeyprovReason.KEYPROV_REQUEST_INVALID, false));
         when(protocolValidator.isAllowedDownlinkPayloadType(RESP_TYPE)).thenReturn(true);
         when(sessionService.isGenerationCurrent("DEVICE001", 3L)).thenReturn(true);
         when(envelopeFactory.buildDownlink(any(), any(), eq(RESP_TYPE), eq(rejectPayload), any()))
@@ -256,7 +263,7 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_vmdUnavailable_shouldFailClosed() {
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
         when(vmdGateway.relay(any())).thenReturn(VmdRelayResult.unavailable(KeyprovReason.KEYPROV_VMD_UNAVAILABLE));
 
@@ -267,7 +274,7 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_vmdOutcomeUnknown_shouldNotCreateNewRequestId() {
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
         when(vmdGateway.relay(any())).thenReturn(VmdRelayResult.outcomeUnknown("req-001", KeyprovReason.KEYPROV_OUTCOME_UNKNOWN));
 
@@ -280,7 +287,7 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_vmdThrows_shouldFailWithUnavailable() {
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
         when(vmdGateway.relay(any())).thenThrow(new RuntimeException("timeout"));
 
@@ -291,7 +298,7 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_vmdIdentityMismatchResponse_shouldKeepVmdReason() {
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
         when(vmdGateway.relay(any())).thenReturn(VmdRelayResult.rejected("req-001",
                 KeyprovReason.KEYPROV_IDENTITY_MISMATCH));
@@ -303,10 +310,10 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_generationStale_shouldFailClosedAndNotPublish() {
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
         when(vmdGateway.relay(any())).thenReturn(new VmdRelayResult("req-001", RESP_TYPE, new byte[]{1},
-                123L, KeyprovOutcome.SUCCESS, null));
+                123L, KeyprovOutcome.SUCCESS, null, false));
         when(protocolValidator.isAllowedDownlinkPayloadType(RESP_TYPE)).thenReturn(true);
         when(sessionService.isGenerationCurrent("DEVICE001", 3L)).thenReturn(false);
 
@@ -318,10 +325,10 @@ class KeyprovRelayAppServiceTest {
 
     @Test
     void relay_downlinkPublishFails_shouldFailClosed() throws Exception {
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
         when(vmdGateway.relay(any())).thenReturn(new VmdRelayResult("req-001", RESP_TYPE, new byte[]{1},
-                123L, KeyprovOutcome.SUCCESS, null));
+                123L, KeyprovOutcome.SUCCESS, null, false));
         when(protocolValidator.isAllowedDownlinkPayloadType(RESP_TYPE)).thenReturn(true);
         when(sessionService.isGenerationCurrent("DEVICE001", 3L)).thenReturn(true);
         when(envelopeFactory.buildDownlink(any(), any(), eq(RESP_TYPE), any(), any())).thenReturn(uplink());

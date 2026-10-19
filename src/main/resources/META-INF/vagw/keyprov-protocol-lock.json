@@ -1,0 +1,12 @@
+{
+  "parProtoRelease": "0.0.1-SNAPSHOT",
+  "descriptorSetSha256": "cd610406aad05d5215a953c140a28b547fa3b2eb537ac7b27023e2911c3f5230",
+  "packageName": "security.keyprov.v1",
+  "service": "security.keyprov",
+  "protocolVersion": "keyprov-v1",
+  "registryDigest": "97fc1166ca1ebbb0cc3e37a47d656d3d59f2330e0450fd1b763d079697cf9bde",
+  "protocVersion": "3.25.5",
+  "protobufRuntimeVersion": "3.25.5",
+  "goldenVectorSetDigest": "23b1e2fe655ea327ad22c4f4e2fcd7c946f01d1768d03aae649eacff3cd12e77",
+  "sensitiveLoggingGuardPassed": true
+}

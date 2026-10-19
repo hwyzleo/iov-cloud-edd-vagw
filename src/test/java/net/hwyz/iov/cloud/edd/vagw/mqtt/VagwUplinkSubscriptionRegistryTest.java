@@ -128,7 +128,7 @@ class VagwUplinkSubscriptionRegistryTest {
         properties.setUplinkSubscriptions(List.of(
                 sub("fota", "vehicle/+/up/fota", 1, true),
                 sub("security.keyprov", "vehicle/+/up/keyprov", 1, true)));
-        when(contractGuard.compatible()).thenReturn(true);
+        when(contractGuard.statusPathAvailable()).thenReturn(true);
 
         List<VagwUplinkSubscriptionRegistry.ResolvedSubscription> resolved = registry().resolveActive();
 
@@ -142,7 +142,7 @@ class VagwUplinkSubscriptionRegistryTest {
         properties.setUplinkSubscriptions(List.of(
                 sub("fota", "vehicle/+/up/fota", 1, true),
                 sub("security.keyprov", "vehicle/+/up/keyprov", 1, true)));
-        when(contractGuard.compatible()).thenReturn(false);
+        when(contractGuard.statusPathAvailable()).thenReturn(false);
 
         List<VagwUplinkSubscriptionRegistry.ResolvedSubscription> resolved = registry().resolveActive();
 

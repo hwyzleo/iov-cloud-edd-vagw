@@ -13,10 +13,16 @@ import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovReason;
 import net.hwyz.iov.cloud.edd.vagw.service.KeyprovMetrics;
 import net.hwyz.iov.cloud.edd.vagw.service.SessionService;
 import net.hwyz.iov.cloud.edd.vagw.service.VagwMqttSubscriptionMetrics;
+import net.hwyz.iov.security.keyprov.v1.KeyEnvelopeFormat;
+import net.hwyz.iov.security.keyprov.v1.KeyImportItemResult;
+import net.hwyz.iov.security.keyprov.v1.KeyImportResult;
+import net.hwyz.iov.security.keyprov.v1.KeyProvisioningAck;
 import net.hwyz.iov.security.keyprov.v1.KeyProvisioningRequest;
 import net.hwyz.iov.security.keyprov.v1.KeyProvisioningResponse;
 import net.hwyz.iov.security.keyprov.v1.KeyProvisioningResult;
+import net.hwyz.iov.security.keyprov.v1.KeyPurpose;
 import net.hwyz.iov.security.keyprov.v1.WrappedKeyItem;
+import net.hwyz.iov.security.keyprov.v1.WrappingSuite;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -82,7 +88,7 @@ class KeyprovRelayPathIntegrationTest {
                 vmdGateway, envelopeFactory, downlinkPublisher, sessionService, metrics);
         KeyprovAdmissionBulkhead bulkhead = new KeyprovAdmissionBulkhead(properties, metrics);
         executor = new KeyprovExecutor(properties, metrics);
-        adapter = new KeyprovMqttIngressAdapter(properties, guard, validator, resolver, bulkhead, executor, relay,
+        adapter = new KeyprovMqttIngressAdapter(properties, validator, resolver, bulkhead, executor, relay,
                 new VagwMqttSubscriptionMetrics());
     }
 
@@ -140,8 +146,59 @@ class KeyprovRelayPathIntegrationTest {
                 .setMessageId("up-msg-001")
                 .setRequestId("req-001")
                 .setPayloadType(REQ_TYPE)
-                .setPayload(KeyProvisioningRequest.newBuilder()
-                        .setRequestId("req-001").setIdempotencyKey("idem-001").build().toByteString())
+                .setPayload(validRequest().toByteString())
+                .build().toByteArray();
+    }
+
+    private static KeyProvisioningRequest validRequest() {
+        return KeyProvisioningRequest.newBuilder()
+                .setRequestId("req-001")
+                .setIdempotencyKey("idem-001")
+                .setBusinessDomain("V2C_COMM")
+                .addPurposes(KeyPurpose.KEY_PURPOSE_UPLINK_AEAD)
+                .addPurposes(KeyPurpose.KEY_PURPOSE_DOWNLINK_AEAD)
+                .addSupportedWrappingSuites(
+                        WrappingSuite.WRAPPING_SUITE_ECDH_ES_P256_HKDF_SHA256_AES256GCM)
+                .addSupportedEnvelopeFormats(KeyEnvelopeFormat.KEY_ENVELOPE_FORMAT_ECDH_ES_P256_V1)
+                .build();
+    }
+
+    private static KeyImportItemResult ackItem(KeyPurpose purpose, byte proofByte) {
+        return KeyImportItemResult.newBuilder()
+                .setPurpose(purpose)
+                .setKeyId("key-" + purpose.getNumber())
+                .setBusinessKeyVersion(1L)
+                .setResult(KeyImportResult.KEY_IMPORT_RESULT_IMPORTED)
+                .setImportProofAlgorithmValue(1)
+                .setImportProof(com.google.protobuf.ByteString.copyFrom(repeat(proofByte, 64)))
+                .setRecipientCertificateDigest(com.google.protobuf.ByteString.copyFrom(repeat((byte) 0x22, 32)))
+                .setEnvelopeDigest(com.google.protobuf.ByteString.copyFrom(repeat((byte) 0x33, 32)))
+                .setKeyCheckValue(com.google.protobuf.ByteString.copyFrom(new byte[]{0x0A, 0x0B, 0x0C}))
+                .setEnvelopeFormat(KeyEnvelopeFormat.KEY_ENVELOPE_FORMAT_ECDH_ES_P256_V1)
+                .build();
+    }
+
+    private static byte[] repeat(byte value, int length) {
+        byte[] bytes = new byte[length];
+        java.util.Arrays.fill(bytes, value);
+        return bytes;
+    }
+
+    private static byte[] ackEnvelope() {
+        KeyProvisioningAck ack = KeyProvisioningAck.newBuilder()
+                .setRequestId("req-001")
+                .addItems(ackItem(KeyPurpose.KEY_PURPOSE_UPLINK_AEAD, (byte) 0x41))
+                .addItems(ackItem(KeyPurpose.KEY_PURPOSE_DOWNLINK_AEAD, (byte) 0x42))
+                .build();
+        return Envelope.VehicleMessageEnvelope.newBuilder()
+                .setService("security.keyprov")
+                .setProtocolVersion("keyprov-v1")
+                .setMessageKind(Envelope.MessageKind.MESSAGE_KIND_REQUEST)
+                .setDeviceId("DEVICE001")
+                .setMessageId("up-ack-001")
+                .setRequestId("req-001")
+                .setPayloadType("security.keyprov.v1.KeyProvisioningAck")
+                .setPayload(ack.toByteString())
                 .build().toByteArray();
     }
 
@@ -160,8 +217,9 @@ class KeyprovRelayPathIntegrationTest {
                                 com.google.protobuf.ByteString.copyFrom(wrappedKey)))
                 .setExpireAtMs(1900000000000L)
                 .build().toByteArray();
+        byte[] expectedResponse = canonicalResponse.clone();
         when(vmdGateway.relay(any())).thenReturn(new VmdRelayResult("req-001", RESP_TYPE,
-                canonicalResponse, 1900000000000L, KeyprovOutcome.SUCCESS, null));
+                canonicalResponse, 1900000000000L, KeyprovOutcome.SUCCESS, null, false));
 
         ArgumentCaptor<byte[]> published = ArgumentCaptor.forClass(byte[].class);
         when(downlinkPublisher.publish(eq("DEVICE001"), published.capture()))
@@ -184,7 +242,7 @@ class KeyprovRelayPathIntegrationTest {
         assertEquals(RESP_TYPE, down.getPayloadType());
         assertEquals(1900000000000L, down.getExpireAtMs());
         assertNotEquals("up-msg-001", down.getMessageId(), "下行必须生成新 messageId");
-        assertArrayEquals(canonicalResponse, down.getPayload().toByteArray(),
+        assertArrayEquals(expectedResponse, down.getPayload().toByteArray(),
                 "VAGW 必须原样透传 VMD canonical payload");
     }
 
@@ -220,5 +278,51 @@ class KeyprovRelayPathIntegrationTest {
 
         verifyNoInteractions(vmdGateway);
         verifyNoInteractions(downlinkPublisher);
+    }
+
+    @Test
+    @DisplayName("ACK→AckResult：CR-008 proof bytes 经 MQTT→VAGW→VMD 逐字节一致")
+    void ackImportAttestation_endToEnd_shouldRelayCanonicalBytesVerbatim() throws Exception {
+        when(sessionService.getSessionByDeviceSn("DEVICE001")).thenReturn(Optional.of(onlineSession()));
+        when(sessionService.isGenerationCurrent("DEVICE001", 2L)).thenReturn(true);
+
+        byte[] canonicalAckResult = net.hwyz.iov.security.keyprov.v1.KeyProvisioningAckResult.newBuilder()
+                .setRequestId("req-001")
+                .setResult(KeyProvisioningResult.KEY_PROVISIONING_RESULT_SUCCEEDED)
+                .setOccurredAtMs(1900000000000L)
+                .build().toByteArray();
+        byte[] expectedAckResult = canonicalAckResult.clone();
+        java.util.concurrent.atomic.AtomicReference<byte[]> forwardedPayload =
+                new java.util.concurrent.atomic.AtomicReference<>();
+        when(vmdGateway.relay(any())).thenAnswer(invocation -> {
+            VmdKeyProvisioningCommand command = invocation.getArgument(0);
+            // 敏感 payload 在 relay finally 会被清零；在调用点复制以验证逐字节一致
+            forwardedPayload.set(command.canonicalPayload().clone());
+            return new VmdRelayResult("req-001",
+                    "security.keyprov.v1.KeyProvisioningAckResult", canonicalAckResult, null,
+                    KeyprovOutcome.SUCCESS, null, false);
+        });
+        ArgumentCaptor<byte[]> published = ArgumentCaptor.forClass(byte[].class);
+        when(downlinkPublisher.publish(eq("DEVICE001"), published.capture()))
+                .thenReturn("vehicle/DEVICE001/down/keyprov");
+
+        byte[] uplink = ackEnvelope();
+        byte[] originalPayload = Envelope.VehicleMessageEnvelope.parseFrom(uplink)
+                .getPayload().toByteArray();
+        long baseline = executor.completedTaskCount();
+        adapter.handleUplink("vehicle/DEVICE001/up/keyprov", uplink);
+        awaitExecutorIdle(baseline);
+
+        assertArrayEquals(originalPayload, forwardedPayload.get(),
+                "VAGW 不得重序列化/改写 ACK proof 字段，必须逐字节提交 VMD");
+        assertArrayEquals(originalPayload, Envelope.VehicleMessageEnvelope.parseFrom(uplink)
+                        .getPayload().toByteArray(),
+                "VAGW 校验后不得修改原 MQTT payload");
+
+        Envelope.VehicleMessageEnvelope down = Envelope.VehicleMessageEnvelope.parseFrom(
+                published.getValue());
+        assertArrayEquals(expectedAckResult, down.getPayload().toByteArray(),
+                "VMD AckResult canonical bytes 必须原样下发");
+        assertEquals("security.keyprov.v1.KeyProvisioningAckResult", down.getPayloadType());
     }
 }

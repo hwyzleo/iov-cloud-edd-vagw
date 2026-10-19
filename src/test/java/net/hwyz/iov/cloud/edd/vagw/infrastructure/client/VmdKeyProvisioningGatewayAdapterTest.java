@@ -5,6 +5,8 @@ import net.hwyz.iov.cloud.edd.vagw.application.keyprov.VmdKeyProvisioningCommand
 import net.hwyz.iov.cloud.edd.vagw.application.keyprov.VmdRelayResult;
 import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovCircuitBreaker;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovContractGuard;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovProtocolLock;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.BrokerAuthenticatedPublishContext;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovContextSource;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovOutcome;
@@ -63,6 +65,7 @@ class VmdKeyProvisioningGatewayAdapterTest {
     private KeyprovProperties properties;
     private KeyprovCircuitBreaker circuitBreaker;
     private KeyprovMetrics metrics;
+    private KeyprovContractGuard guard;
     private VmdKeyProvisioningGatewayAdapter adapter;
 
     @BeforeEach
@@ -75,7 +78,11 @@ class VmdKeyProvisioningGatewayAdapterTest {
         properties.getCircuitBreaker().setHalfOpenProbes(1);
         metrics = new KeyprovMetrics();
         circuitBreaker = new KeyprovCircuitBreaker(properties, metrics);
-        adapter = new VmdKeyProvisioningGatewayAdapter(vmdService, properties, circuitBreaker, metrics);
+        guard = new KeyprovContractGuard();
+        guard.verify();
+        assertTrue(guard.compatible(), () -> "keyprov lock must be READY in test classpath: "
+                + guard.incompatibilityReason());
+        adapter = new VmdKeyProvisioningGatewayAdapter(vmdService, properties, circuitBreaker, metrics, guard);
     }
 
     private VmdKeyProvisioningCommand command(String payloadType) {
@@ -119,6 +126,11 @@ class VmdKeyProvisioningGatewayAdapterTest {
         assertEquals("keyprov-v1", request.getSchemaVersion());
         assertArrayEquals(PAYLOAD, request.getPayloadBytes());
         assertEquals(sha256(PAYLOAD), request.getPayloadDigest());
+        KeyprovProtocolLock lock = guard.lock();
+        assertEquals(lock.parProtoRelease(), request.getProtocolRelease(),
+                "request 必须携带 VAGW 实际锁定的 PAR-PROTO release");
+        assertEquals(lock.descriptorSetSha256(), request.getDescriptorSetHash(),
+                "request 必须携带实际 DescriptorSet hash");
 
         assertEquals(KeyprovOutcome.SUCCESS, result.outcome());
         assertTrue(result.hasPayload());
@@ -171,7 +183,13 @@ class VmdKeyProvisioningGatewayAdapterTest {
             "806097, KEYPROV_VMD_REJECTED, REJECTED",
             "806098, KEYPROV_OUTCOME_UNKNOWN, OUTCOME_UNKNOWN",
             "806099, KEYPROV_BATCH_NOT_FOUND, REJECTED",
-            "806100, KEYPROV_VMD_UNAVAILABLE, UNAVAILABLE"
+            "806100, KEYPROV_VMD_UNAVAILABLE, UNAVAILABLE",
+            "806101, KEYPROV_CERTIFICATE_MATERIAL_UNAVAILABLE, UNAVAILABLE",
+            "806105, KEYPROV_IMPORT_PROOF_VERIFIER_UNAVAILABLE, UNAVAILABLE",
+            "806107, KEYPROV_VMD_UNAVAILABLE, UNAVAILABLE",
+            "806109, KEYPROV_PROTOCOL_UNSUPPORTED, REJECTED",
+            "806110, KEYPROV_PAYLOAD_INVALID, REJECTED",
+            "806111, KEYPROV_IMPORT_ATTESTATION_REJECTED, REJECTED"
     })
     void vmdErrorCode_shouldMapToStableReason(String code, KeyprovReason expectedReason,
                                               KeyprovOutcome expectedOutcome) {
@@ -217,7 +235,7 @@ class VmdKeyProvisioningGatewayAdapterTest {
         properties.getCircuitBreaker().setFailureRateThreshold(1.0d);
         KeyprovCircuitBreaker breaker = new KeyprovCircuitBreaker(properties, metrics);
         VmdKeyProvisioningGatewayAdapter guarded =
-                new VmdKeyProvisioningGatewayAdapter(vmdService, properties, breaker, metrics);
+                new VmdKeyProvisioningGatewayAdapter(vmdService, properties, breaker, metrics, guard);
 
         when(vmdService.request(any())).thenReturn(VmdKeyProvisioningResponse.builder()
                 .outcome(VmdKeyProvisioningOutcome.UNAVAILABLE)
@@ -234,7 +252,7 @@ class VmdKeyProvisioningGatewayAdapterTest {
         properties.getCircuitBreaker().setFailureRateThreshold(1.0d);
         KeyprovCircuitBreaker breaker = new KeyprovCircuitBreaker(properties, metrics);
         VmdKeyProvisioningGatewayAdapter guarded =
-                new VmdKeyProvisioningGatewayAdapter(vmdService, properties, breaker, metrics);
+                new VmdKeyProvisioningGatewayAdapter(vmdService, properties, breaker, metrics, guard);
 
         when(vmdService.request(any())).thenReturn(VmdKeyProvisioningResponse.builder()
                 .outcome(VmdKeyProvisioningOutcome.REJECTED)
@@ -245,6 +263,70 @@ class VmdKeyProvisioningGatewayAdapterTest {
         assertEquals(KeyprovReason.KEYPROV_REQUEST_INVALID, result.reason());
         assertEquals(KeyprovCircuitBreaker.State.CLOSED, breaker.state(),
                 "业务拒绝不得计入依赖故障率");
+    }
+
+    @Test
+    void deterministicImportAttestationRejection_shouldNotCountAsDependencyFailure() {
+        properties.getCircuitBreaker().setEnabled(true);
+        properties.getCircuitBreaker().setMinimumCalls(1);
+        properties.getCircuitBreaker().setFailureRateThreshold(1.0d);
+        KeyprovCircuitBreaker breaker = new KeyprovCircuitBreaker(properties, metrics);
+        VmdKeyProvisioningGatewayAdapter guarded =
+                new VmdKeyProvisioningGatewayAdapter(vmdService, properties, breaker, metrics, guard);
+
+        when(vmdService.ack(any())).thenReturn(VmdKeyProvisioningAckResult.builder()
+                .outcome(VmdKeyProvisioningOutcome.REJECTED)
+                .error(VmdKeyProvisioningError.builder().code("806111").retryable(false).build())
+                .build());
+        VmdRelayResult result = guarded.relay(command(ACK_TYPE));
+
+        assertEquals(KeyprovReason.KEYPROV_IMPORT_ATTESTATION_REJECTED, result.reason());
+        assertFalse(result.dependencyFailure(), "确定性 proof 拒绝不得标记为依赖故障");
+        assertEquals(KeyprovCircuitBreaker.State.CLOSED, breaker.state(),
+                "VMD/FW 确定性 Import Attestation 拒绝不得计入熔断");
+    }
+
+    @Test
+    void vmdOutcomeUnknownBusinessResult_shouldNotCountAsDependencyFailure() {
+        properties.getCircuitBreaker().setEnabled(true);
+        properties.getCircuitBreaker().setMinimumCalls(1);
+        properties.getCircuitBreaker().setFailureRateThreshold(1.0d);
+        KeyprovCircuitBreaker breaker = new KeyprovCircuitBreaker(properties, metrics);
+        VmdKeyProvisioningGatewayAdapter guarded =
+                new VmdKeyProvisioningGatewayAdapter(vmdService, properties, breaker, metrics, guard);
+
+        when(vmdService.request(any())).thenReturn(VmdKeyProvisioningResponse.builder()
+                .requestId("r1")
+                .outcome(VmdKeyProvisioningOutcome.OUTCOME_UNKNOWN)
+                .error(VmdKeyProvisioningError.builder().code("806098").retryable(true).build())
+                .build());
+        VmdRelayResult result = guarded.relay(command(REQ_TYPE));
+
+        assertEquals(KeyprovReason.KEYPROV_OUTCOME_UNKNOWN, result.reason());
+        assertFalse(result.dependencyFailure(),
+                "VMD 业务结果未知不是依赖故障，不得计入熔断");
+        assertEquals(KeyprovCircuitBreaker.State.CLOSED, breaker.state());
+    }
+
+    @Test
+    void importProofVerifierUnavailable_shouldCountAsDependencyFailure() {
+        properties.getCircuitBreaker().setEnabled(true);
+        properties.getCircuitBreaker().setMinimumCalls(1);
+        properties.getCircuitBreaker().setFailureRateThreshold(1.0d);
+        KeyprovCircuitBreaker breaker = new KeyprovCircuitBreaker(properties, metrics);
+        VmdKeyProvisioningGatewayAdapter guarded =
+                new VmdKeyProvisioningGatewayAdapter(vmdService, properties, breaker, metrics, guard);
+
+        when(vmdService.ack(any())).thenReturn(VmdKeyProvisioningAckResult.builder()
+                .outcome(VmdKeyProvisioningOutcome.UNAVAILABLE)
+                .error(VmdKeyProvisioningError.builder().code("806105").retryable(true).build())
+                .build());
+        VmdRelayResult result = guarded.relay(command(ACK_TYPE));
+
+        assertEquals(KeyprovReason.KEYPROV_IMPORT_PROOF_VERIFIER_UNAVAILABLE, result.reason());
+        assertTrue(result.dependencyFailure());
+        assertEquals(KeyprovCircuitBreaker.State.OPEN, breaker.state(),
+                "verifier/材料暂不可用属于依赖故障，应计入熔断");
     }
 
     @ParameterizedTest(name = "VMD {0} + canonical payload -> 原样转发")
@@ -282,7 +364,7 @@ class VmdKeyProvisioningGatewayAdapterTest {
         properties.getCircuitBreaker().setFailureRateThreshold(1.0d);
         KeyprovCircuitBreaker breaker = new KeyprovCircuitBreaker(properties, metrics);
         VmdKeyProvisioningGatewayAdapter guarded =
-                new VmdKeyProvisioningGatewayAdapter(vmdService, properties, breaker, metrics);
+                new VmdKeyProvisioningGatewayAdapter(vmdService, properties, breaker, metrics, guard);
 
         when(vmdService.request(any())).thenReturn(VmdKeyProvisioningResponse.builder()
                 .requestId("r1").payloadType(RESP_TYPE).payloadBytes(new byte[]{1})
@@ -319,6 +401,8 @@ class VmdKeyProvisioningGatewayAdapterTest {
 
         assertEquals(KeyprovOutcome.OUTCOME_UNKNOWN, result.outcome());
         assertEquals(KeyprovReason.KEYPROV_OUTCOME_UNKNOWN, result.reason());
+        assertEquals("r1", result.requestId(), "read timeout 必须保留原 requestId 供 /status 对账");
+        assertTrue(result.dependencyFailure(), "传输类 timeout 应计入依赖故障");
         verify(vmdService, times(1)).request(any());
     }
 
@@ -342,7 +426,7 @@ class VmdKeyProvisioningGatewayAdapterTest {
         properties.getCircuitBreaker().setFailureRateThreshold(1.0d);
         KeyprovCircuitBreaker openBreaker = new KeyprovCircuitBreaker(properties, metrics);
         VmdKeyProvisioningGatewayAdapter openAdapter =
-                new VmdKeyProvisioningGatewayAdapter(vmdService, properties, openBreaker, metrics);
+                new VmdKeyProvisioningGatewayAdapter(vmdService, properties, openBreaker, metrics, guard);
 
         assertTrue(openBreaker.allowRequest());
         openBreaker.recordDependencyFailure();

@@ -33,7 +33,7 @@ class KeyprovSensitiveDataTest {
         VmdRelayResult result = new VmdRelayResult("req-1",
                 "security.keyprov.v1.KeyProvisioningResponse",
                 SECRET.getBytes(StandardCharsets.UTF_8), 1L,
-                KeyprovOutcome.SUCCESS, null);
+                KeyprovOutcome.SUCCESS, null, false);
 
         assertFalse(result.toString().contains(SECRET));
     }
@@ -73,13 +73,92 @@ class KeyprovSensitiveDataTest {
             offenders = paths.filter(p -> p.toString().endsWith(".java"))
                     .filter(p -> {
                         String name = p.toString();
-                        return name.contains("/keyprov/") || name.contains("Keyprov");
+                        return (name.contains("/keyprov/") || name.contains("Keyprov"))
+                                && !name.contains("/build/");
                     })
                     .filter(KeyprovSensitiveDataTest::containsForbiddenSensitiveSerialization)
                     .map(Path::toString)
                     .toList();
         }
         assertEquals(List.of(), offenders, "keyprov sources must not serialize sensitive payload");
+    }
+
+    @Test
+    void keyprovSources_shouldNotImplementProofCanonicalizationOrSignatureVerification() throws IOException {
+        Path root = Path.of("src", "main", "java", "net", "hwyz", "iov", "cloud", "edd", "vagw");
+        List<String> offenders;
+        try (Stream<Path> paths = Files.walk(root)) {
+            offenders = paths.filter(p -> p.toString().endsWith(".java"))
+                    .filter(p -> {
+                        String name = p.toString();
+                        return (name.contains("/keyprov/") || name.contains("Keyprov"))
+                                && !name.contains("/build/");
+                    })
+                    .filter(p -> containsForbiddenCryptoImplementation(p))
+                    .map(Path::toString)
+                    .toList();
+        }
+        assertEquals(List.of(), offenders,
+                "VAGW 不得实现 proofInputV1/P1363/low-S/ECDSA 验签或证书绑定");
+    }
+
+    private static boolean containsForbiddenCryptoImplementation(Path path) {
+        String code = stripComments(read(path));
+        return code.contains("proofInput")
+                || code.contains("P1363")
+                || code.contains("ECDSA")
+                || code.contains("low-S")
+                || code.contains("java.security.Signature")
+                || code.contains("Signature.getInstance")
+                || code.contains("getImportProof().toString()");
+    }
+
+    private static String stripComments(String source) {
+        StringBuilder out = new StringBuilder(source.length());
+        int i = 0;
+        boolean line = false;
+        boolean block = false;
+        while (i < source.length()) {
+            char current = source.charAt(i);
+            if (line) {
+                if (current == '\n') {
+                    line = false;
+                    out.append(current);
+                }
+                i++;
+                continue;
+            }
+            if (block) {
+                if (current == '*' && i + 1 < source.length() && source.charAt(i + 1) == '/') {
+                    block = false;
+                    i += 2;
+                } else {
+                    i++;
+                }
+                continue;
+            }
+            if (current == '/' && i + 1 < source.length() && source.charAt(i + 1) == '/') {
+                line = true;
+                i += 2;
+                continue;
+            }
+            if (current == '/' && i + 1 < source.length() && source.charAt(i + 1) == '*') {
+                block = true;
+                i += 2;
+                continue;
+            }
+            out.append(current);
+            i++;
+        }
+        return out.toString();
+    }
+
+    private static String read(Path path) {
+        try {
+            return Files.readString(path, StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private static boolean containsForbiddenSensitiveSerialization(Path path) {

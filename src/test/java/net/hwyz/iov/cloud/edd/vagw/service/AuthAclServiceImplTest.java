@@ -154,7 +154,7 @@ class AuthAclServiceImplTest {
     void authenticate_keyprovEnabledAndCompatible_shouldGrantKeyprovAcl() {
         when(tspDeviceAdmissionService.decide(any())).thenReturn(allowResult());
         when(keyprovProperties.isEnabled()).thenReturn(true);
-        when(keyprovContractGuard.compatible()).thenReturn(true);
+        when(keyprovContractGuard.statusPathAvailable()).thenReturn(true);
 
         AuthAclService.AuthResult result = authAclService.authenticate(
                 "DEVICE-001", "client001", validPem, "10.0.0.8");
@@ -169,7 +169,7 @@ class AuthAclServiceImplTest {
     void authenticate_keyprovEnabledButIncompatible_shouldNotGrantKeyprovAcl() {
         when(tspDeviceAdmissionService.decide(any())).thenReturn(allowResult());
         when(keyprovProperties.isEnabled()).thenReturn(true);
-        when(keyprovContractGuard.compatible()).thenReturn(false);
+        when(keyprovContractGuard.statusPathAvailable()).thenReturn(false);
 
         AuthAclService.AuthResult result = authAclService.authenticate(
                 "DEVICE-001", "client001", validPem, "10.0.0.8");

@@ -8,6 +8,8 @@ import net.hwyz.iov.cloud.edd.vagw.application.keyprov.VmdKeyProvisioningGateway
 import net.hwyz.iov.cloud.edd.vagw.application.keyprov.VmdRelayResult;
 import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovCircuitBreaker;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovContractGuard;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovProtocolLock;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.BrokerAuthenticatedPublishContext;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovMessageType;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovOutcome;
@@ -45,7 +47,7 @@ import java.util.Optional;
  *   <li>按 canonical 上行消息类型分派官方三端点：Request→/request、Ack→/ack、StatusRequest→/status；</li>
  *   <li>wire 携带 payloadType、schemaVersion、canonical payloadBytes 与 sha-256 payloadDigest，
  *       VAGW 不做 JSON↔proto 转换；</li>
- *   <li>官方响应 outcome／806xxx → VAGW 稳定 804010 reason 映射；</li>
+ *   <li>官方响应 outcome／806090–806111 → VAGW 稳定 804017 reason 映射；</li>
  *   <li>统一 absolute deadline 下的有限重试（仅在明确证明请求未发出时、同一 requestId 内）；</li>
  *   <li>Keyprov 专属熔断治理（仅统计依赖类失败）。</li>
  * </ul>
@@ -63,9 +65,16 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
     private final KeyprovProperties properties;
     private final KeyprovCircuitBreaker circuitBreaker;
     private final KeyprovMetrics metrics;
+    private final KeyprovContractGuard contractGuard;
 
     @Override
     public VmdRelayResult relay(VmdKeyProvisioningCommand command) {
+        KeyprovProtocolLock lock = contractGuard.lock();
+        if (lock == null) {
+            metrics.vmdCall("lock_not_ready");
+            return VmdRelayResult.rejected(command.envelope().getRequestId(),
+                    KeyprovReason.KEYPROV_LOCK_MANIFEST_INVALID);
+        }
         if (!circuitBreaker.allowRequest()) {
             metrics.vmdCall("circuit_open");
             return VmdRelayResult.circuitOpen(KeyprovReason.KEYPROV_CIRCUIT_OPEN);
@@ -83,8 +92,12 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
             return result;
         } catch (RuntimeException e) {
             metrics.vmdLatency(elapsedMillis(startedAt));
-            circuitBreaker.recordDependencyFailure();
-            VmdRelayResult result = classify(e);
+            VmdRelayResult result = classify(e, command.envelope().getRequestId());
+            if (result.dependencyFailure()) {
+                circuitBreaker.recordDependencyFailure();
+            } else {
+                circuitBreaker.recordSuccess();
+            }
             metrics.vmdCall(metricLabel(result));
             // 只输出异常类型与稳定 reason，不输出请求/响应内容
             log.warn("Keyprov VMD call failed: outcome={}, reason={}, exception={}",
@@ -123,6 +136,11 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
     }
 
     private VmdRelayResult invoke(VmdKeyProvisioningCommand command, KeyprovMessageType type) {
+        KeyprovProtocolLock lock = contractGuard.lock();
+        if (lock == null) {
+            return VmdRelayResult.rejected(command.envelope().getRequestId(),
+                    KeyprovReason.KEYPROV_LOCK_MANIFEST_INVALID);
+        }
         VagwAuthenticatedDeviceContext context = toDeviceContext(command.context());
         String payloadType = command.envelope().getPayloadType();
         String schemaVersion = command.envelope().getProtocolVersion();
@@ -135,8 +153,12 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
                     digestFingerprint(digest));
         }
         return switch (type) {
+            // 可信锁版上下文只进入官方 /request（CR-062 仅该 DTO 定义 protocolRelease/descriptorSetHash）；
+            // ACK/Status 按官方契约不重复声明，VAGW 不得复制字段或另建 DTO。
             case KEY_PROVISIONING_REQUEST -> mapResponse(vmdService.request(VmdKeyProvisioningRequest.builder()
                     .deviceContext(context).payloadType(payloadType).schemaVersion(schemaVersion)
+                    .protocolRelease(lock.parProtoRelease())
+                    .descriptorSetHash(lock.descriptorSetSha256())
                     .payloadBytes(payload).payloadDigest(digest).build()));
             case KEY_PROVISIONING_ACK -> mapAck(vmdService.ack(VmdKeyProvisioningAckRequest.builder()
                     .deviceContext(context).payloadType(payloadType).schemaVersion(schemaVersion)
@@ -196,7 +218,7 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
                 return VmdRelayResult.unavailable(KeyprovReason.KEYPROV_VMD_UNAVAILABLE);
             }
             return new VmdRelayResult(requestId, payloadType, payloadBytes, expireAtMs,
-                    KeyprovOutcome.SUCCESS, null);
+                    KeyprovOutcome.SUCCESS, null, false);
         }
         // 诊断：VAGW 对外只上报稳定 reason，这里额外保留 VMD 登记的 806xxx 与脱敏 message，
         // 便于按 requestId 与 VMD 侧日志关联定位（不含 payload / Wrapped Key）
@@ -208,15 +230,19 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
                 error == null ? null : error.getMessage());
         KeyprovReason reason = mapReason(outcome, error);
         KeyprovOutcome relayOutcome = toRelayOutcome(outcome);
+        // 仅 VMD 明确返回依赖不可用（806096/806100/806101/806105/806107）计入熔断；
+        // 806098 业务结果未知与 806111 等确定性拒绝不计入依赖故障率。
+        boolean dependencyFailure = relayOutcome == KeyprovOutcome.UNAVAILABLE;
         // VMD 在非成功结果上同样返回 canonical 下行 payload（ProtocolError）：VAGW 原样转发，
         // 车端据 result/error.retryable 收敛（BLOCKED 或按原 requestId 重试），不再盲重投
         if (payloadType != null && !payloadType.isBlank() && payloadBytes != null) {
             log.info("Keyprov VMD 非成功但返回 canonical 下行 payload: requestId={}, outcome={}, downlinkPayloadType={}, payloadBytes={}",
                     requestId, relayOutcome, payloadType, payloadBytes.length);
-            return new VmdRelayResult(requestId, payloadType, payloadBytes, expireAtMs, relayOutcome, reason);
+            return new VmdRelayResult(requestId, payloadType, payloadBytes, expireAtMs, relayOutcome, reason,
+                    dependencyFailure);
         }
         if (relayOutcome == KeyprovOutcome.OUTCOME_UNKNOWN) {
-            return VmdRelayResult.outcomeUnknown(requestId, reason);
+            return VmdRelayResult.outcomeUnknown(requestId, reason, false);
         }
         if (relayOutcome == KeyprovOutcome.REJECTED) {
             return VmdRelayResult.rejected(requestId, reason);
@@ -237,7 +263,11 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
     }
 
     /**
-     * VMD 806090～806100 → VAGW 804010 稳定 reason 精确映射（EDD-VAGW-DSN-CR-016 §5）。
+     * VMD 806090～806111 → VAGW 稳定 reason 精确映射（EDD-VAGW-DSN-CR-016 §5 + CR-017 §10）。
+     * <p>
+     * 确定性 proof/签名/绑定拒绝（806102～806104、806106、806108～806111）不得包装成依赖故障；
+     * 806101/806105/806107 属材料/verifier/Provider 暂不可用，保留原 requestId 且计入熔断。
+     * </p>
      */
     private static KeyprovReason mapReason(VmdKeyProvisioningOutcome outcome, VmdKeyProvisioningError error) {
         String code = error == null ? null : error.getCode();
@@ -254,6 +284,14 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
                 case "806098" -> KeyprovReason.KEYPROV_OUTCOME_UNKNOWN;
                 case "806099" -> KeyprovReason.KEYPROV_BATCH_NOT_FOUND;
                 case "806100" -> KeyprovReason.KEYPROV_VMD_UNAVAILABLE;
+                case "806101" -> KeyprovReason.KEYPROV_CERTIFICATE_MATERIAL_UNAVAILABLE;
+                case "806102", "806103", "806104" -> KeyprovReason.KEYPROV_CERTIFICATE_INVALID;
+                case "806105" -> KeyprovReason.KEYPROV_IMPORT_PROOF_VERIFIER_UNAVAILABLE;
+                case "806106" -> KeyprovReason.KEYPROV_BINDING_INVALID;
+                case "806107" -> KeyprovReason.KEYPROV_VMD_UNAVAILABLE;
+                case "806108", "806109" -> KeyprovReason.KEYPROV_PROTOCOL_UNSUPPORTED;
+                case "806110" -> KeyprovReason.KEYPROV_PAYLOAD_INVALID;
+                case "806111" -> KeyprovReason.KEYPROV_IMPORT_ATTESTATION_REJECTED;
                 default -> null;
             };
             if (mapped != null) {
@@ -269,7 +307,7 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
         };
     }
 
-    private VmdRelayResult classify(Throwable throwable) {
+    private VmdRelayResult classify(Throwable throwable, String requestId) {
         Throwable root = rootCause(throwable);
         if (isConnectFailure(root)) {
             return VmdRelayResult.unavailable(KeyprovReason.KEYPROV_VMD_UNAVAILABLE);
@@ -278,8 +316,8 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
             return VmdRelayResult.timeout(KeyprovReason.KEYPROV_VMD_TIMEOUT);
         }
         if (root instanceof SocketTimeoutException) {
-            // 请求已发出后读取超时：结果未知，不自动重放
-            return VmdRelayResult.outcomeUnknown(null, KeyprovReason.KEYPROV_OUTCOME_UNKNOWN);
+            // 请求已发出后读取超时：结果未知，不自动重放；保留原 requestId 供 /status 对账
+            return VmdRelayResult.outcomeUnknown(requestId, KeyprovReason.KEYPROV_OUTCOME_UNKNOWN, true);
         }
         if (throwable instanceof FeignException feignException) {
             int status = feignException.status();
@@ -292,11 +330,11 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
                 return VmdRelayResult.unavailable(KeyprovReason.KEYPROV_VMD_UNAVAILABLE);
             }
             if (status >= 400) {
-                return VmdRelayResult.rejected(null, KeyprovReason.KEYPROV_VMD_REJECTED);
+                return VmdRelayResult.rejected(requestId, KeyprovReason.KEYPROV_VMD_REJECTED);
             }
         }
-        // 其他网络/IO 异常：无法证明请求未发出，按结果未知 fail-closed
-        return VmdRelayResult.outcomeUnknown(null, KeyprovReason.KEYPROV_OUTCOME_UNKNOWN);
+        // 其他网络/IO 异常：无法证明请求未发出，按结果未知 fail-closed；保留原 requestId
+        return VmdRelayResult.outcomeUnknown(requestId, KeyprovReason.KEYPROV_OUTCOME_UNKNOWN, true);
     }
 
     private static boolean isNotSent(Throwable throwable) {
@@ -328,9 +366,7 @@ public class VmdKeyProvisioningGatewayAdapter implements VmdKeyProvisioningGatew
     }
 
     private static boolean isDependencyFailure(VmdRelayResult result) {
-        return result.outcome() == KeyprovOutcome.UNAVAILABLE
-                || result.outcome() == KeyprovOutcome.TIMEOUT
-                || result.outcome() == KeyprovOutcome.OUTCOME_UNKNOWN;
+        return result.dependencyFailure();
     }
 
     private String metricLabel(VmdRelayResult result) {

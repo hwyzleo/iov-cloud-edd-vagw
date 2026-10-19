@@ -1,0 +1,14 @@
+# Keyprov-v1 release-set vector bundle (EDD-VAGW-DSN-CR-017 §9 / §12-11)
+# Consumed by VAGW only as an opaque SHA-256 digest for readiness. VAGW MUST NOT
+# implement proofInputV1/P1363/ECDSA/low-S or interpret the vectors below.
+# Sources: PAR-PROTO-DSN-CR-008, FW-SEC-DSN-CR-016 (proofInputV1 frozen vector),
+#          VMD-DSN-CR-062 (ACK field binding).
+vector-set-id=keyprov-v1-cr008-release-set
+proofInputV1-uplink-hex=000000166f70656e696f767c6b657970726f762d61636b7c7631000000057265712d31000000085632435f434f4d4d000000010100000020d71ab5437ac14e57c51bb541ab2bad89c3f9a27e6fd8e7d7a7cfef05ad4dacc60000000800000000000000070000002071ebe7d7d6c87699910d0093af8e99df3a149fd500cda64bd90505b4c127c933000000030a0b0c
+ack-import-proof-algorithm=1
+ack-import-proof-bytes=64
+ack-recipient-certificate-digest-bytes=32
+ack-envelope-digest-bytes=32
+ack-key-check-value-bytes=3
+ack-legacy-proof-algorithm=empty
+ack-purpose-count=2

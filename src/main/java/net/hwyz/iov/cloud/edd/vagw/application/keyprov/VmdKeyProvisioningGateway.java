@@ -5,7 +5,7 @@ package net.hwyz.iov.cloud.edd.vagw.application.keyprov;
  * <p>
  * VAGW 应用层只依赖本 Port；其 Adapter {@code VmdKeyProvisioningGatewayAdapter} 直接委托
  * edd-vmd-api 官方 {@code VmdKeyProvisioningService} Feign 契约（request／ack／status 三端点），
- * 并完成认证上下文／canonical bytes 模型映射、VMD 806xxx／异常→VAGW 804010 reason 映射及
+ * 并完成认证上下文／canonical bytes 模型映射、VMD 806090–806111／异常→VAGW 804017 稳定 reason 映射及
  * deadline、有限重试与熔断治理。
  * </p>
  * <p>

@@ -56,5 +56,34 @@ public enum KeyprovReason {
     /** VMD 幂等键冲突（806095）。 */
     KEYPROV_IDEMPOTENCY_CONFLICT,
     /** VMD 开通批次不存在（806099）。 */
-    KEYPROV_BATCH_NOT_FOUND
+    KEYPROV_BATCH_NOT_FOUND,
+    // ------------------------------------------------------------------
+    // EDD-VAGW-DSN-CR-017：协议锁版、CR-008 Import Attestation 与 VMD CR-062
+    // ------------------------------------------------------------------
+    /** KeyprovProtocolLock 缺失、不可读或自相矛盾（部署错误，Keyprov NOT_READY）。 */
+    KEYPROV_LOCK_MANIFEST_INVALID,
+    /** PAR-PROTO release 与制品/清单不一致（Keyprov NOT_READY，不进入熔断统计）。 */
+    KEYPROV_CONTRACT_RELEASE_MISMATCH,
+    /** DescriptorSet SHA-256 与实际制品不一致（Keyprov NOT_READY，不进入熔断统计）。 */
+    KEYPROV_DESCRIPTOR_HASH_MISMATCH,
+    /** canonical payload-type registry 与清单不一致（Keyprov NOT_READY）。 */
+    KEYPROV_REGISTRY_MISMATCH,
+    /** 生成器/protobuf runtime 与清单不一致（Keyprov NOT_READY）。 */
+    KEYPROV_RUNTIME_MISMATCH,
+    /** edd-vmd-api 缺少 CR-062 字段/语义（Keyprov NOT_READY）。 */
+    KEYPROV_VMD_API_INCOMPATIBLE,
+    /** golden vector set digest 不匹配或缺失（Keyprov NOT_READY）。 */
+    KEYPROV_GOLDEN_VECTOR_SET_MISMATCH,
+    /** ACK item 的 import_proof_algorithm 为 0/未知（确定性拒绝，不熔断、不重试）。 */
+    KEYPROV_ACK_ALGORITHM_INVALID,
+    /** ACK item 的 import_proof 非恰好 64B，或非 IMPORTED 项伪造 proof（确定性拒绝）。 */
+    KEYPROV_ACK_PROOF_INVALID,
+    /** ACK item 的 recipient_certificate_digest 非恰好 32B（确定性拒绝）。 */
+    KEYPROV_ACK_CERTIFICATE_DIGEST_INVALID,
+    /** ACK 结构/字段组合非法，或 VMD/FW 返回确定性 Import Attestation 拒绝（806111）。 */
+    KEYPROV_IMPORT_ATTESTATION_REJECTED,
+    /** VMD/FW ImportProofVerifier 或 Provider 暂不可用（806105，依赖类，可重试）。 */
+    KEYPROV_IMPORT_PROOF_VERIFIER_UNAVAILABLE,
+    /** 证书材料/OCSP/CRL 暂不可用（806101，依赖类，可重试）。 */
+    KEYPROV_CERTIFICATE_MATERIAL_UNAVAILABLE
 }

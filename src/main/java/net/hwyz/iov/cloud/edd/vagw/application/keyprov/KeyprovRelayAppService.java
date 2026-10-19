@@ -7,6 +7,7 @@ import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.LogMask;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovContractGuard;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovInbox;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovReadiness;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.BrokerAuthenticatedPublishContext;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovMessageType;
 import net.hwyz.iov.cloud.edd.vagw.model.keyprov.KeyprovOutcome;
@@ -54,9 +55,16 @@ public class KeyprovRelayAppService {
         if (!properties.isEnabled()) {
             return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_DISABLED, messageId(uplink));
         }
-        if (!contractGuard.compatible()) {
-            log.warn("keyprov relay rejected: contract incompatible, reason={}", contractGuard.incompatibilityReason());
-            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_PROTOCOL_UNSUPPORTED, messageId(uplink));
+        KeyprovMessageType uplinkType = uplink == null ? null
+                : KeyprovMessageType.fromFullName(uplink.getPayloadType()).orElse(null);
+        KeyprovReadiness readiness = contractGuard.readiness();
+        if (uplinkType == null || readiness == null || !readiness.allows(uplinkType)) {
+            KeyprovReason reason = readiness == null || readiness.reason() == null
+                    ? KeyprovReason.KEYPROV_PROTOCOL_UNSUPPORTED : readiness.reason();
+            log.warn("keyprov relay rejected: readiness={}, reason={}, detail={}",
+                    readiness == null ? null : readiness.ready(), reason,
+                    readiness == null ? null : readiness.notReadyDetail());
+            return KeyprovRelayResult.fail(reason, messageId(uplink));
         }
 
         KeyprovProtocolValidator.Failure failure = protocolValidator.validateUplink(uplink, rawEnvelope, context);
@@ -67,7 +75,7 @@ public class KeyprovRelayAppService {
             return KeyprovRelayResult.fail(failure.reason(), messageId(uplink));
         }
 
-        KeyprovMessageType uplinkType = KeyprovMessageType.fromFullName(uplink.getPayloadType()).orElseThrow();
+        // validator 已按同一 readiness 门控校验；此处不再重新解析/判断 PayloadType 方向
 
         // 传输层短期去重：相同 messageId+摘要不重复调用 VMD；不同摘要冲突 fail-closed
         KeyprovInbox.State state = inbox.record(uplink.getMessageId(), sha256(rawEnvelope));
@@ -113,48 +121,55 @@ public class KeyprovRelayAppService {
         }
 
         // VAGW 只按 payloadType 与 correlation 转发：类型必须与上行操作对应且在精确下行 registry 内
-        KeyprovMessageType expectedDownlink = uplinkType.expectedDownlink();
-        if (!expectedDownlink.fullName().equals(response.downlinkPayloadType())
-                || !protocolValidator.isAllowedDownlinkPayloadType(response.downlinkPayloadType())) {
-            log.warn("keyprov downlink payload_type rejected: expected={}, actual={}, messageId={}",
-                    expectedDownlink.fullName(), response.downlinkPayloadType(), uplink.getMessageId());
-            inbox.forget(uplink.getMessageId());
-            metrics.downlink("not_delivered");
-            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_PROTOCOL_UNSUPPORTED, uplink.getMessageId());
-        }
-
-        // 下行前再次校验目标身份未被替换（generation guard，fail-closed）
-        // 官方 wire 不再返回路由身份；VAGW 只以认证会话快照复核当前 active session（§2.6）
-        if (!sessionService.isGenerationCurrent(context.hsmUid(), context.connectionGeneration())) {
-            log.warn("keyprov downlink rejected: session replaced/stale, messageId={}, hsmUid={}",
-                    uplink.getMessageId(), LogMask.mask(context.hsmUid()));
-            inbox.forget(uplink.getMessageId());
-            metrics.downlink("not_delivered");
-            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_SESSION_STALE, uplink.getMessageId());
-        }
-
-        byte[] downlinkBytes = envelopeFactory.buildDownlink(
-                context, uplink, response.downlinkPayloadType(), response.downlinkPayload(),
-                response.expireAtMs()).toByteArray();
-
-        String topic;
         try {
-            topic = downlinkPublisher.publish(context.hsmUid(), downlinkBytes);
-        } catch (Exception e) {
-            log.error("keyprov downlink MQTT publish failed: messageId={}, hsmUid={}",
-                    uplink.getMessageId(), LogMask.mask(context.hsmUid()), e);
-            inbox.forget(uplink.getMessageId());
-            metrics.downlink("failed");
-            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_DOWNLINK_PUBLISH_FAILED, uplink.getMessageId());
-        }
+            KeyprovMessageType expectedDownlink = uplinkType.expectedDownlink();
+            if (!expectedDownlink.fullName().equals(response.downlinkPayloadType())
+                    || !protocolValidator.isAllowedDownlinkPayloadType(response.downlinkPayloadType())) {
+                log.warn("keyprov downlink payload_type rejected: expected={}, actual={}, messageId={}",
+                        expectedDownlink.fullName(), response.downlinkPayloadType(), uplink.getMessageId());
+                inbox.forget(uplink.getMessageId());
+                metrics.downlink("not_delivered");
+                return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_PROTOCOL_UNSUPPORTED, uplink.getMessageId());
+            }
 
-        log.info("keyprov relayed: requestId={}, messageId={}, outcome={}, uplinkType={}, downlinkType={}, payloadBytes={}",
-                uplink.getRequestId(), uplink.getMessageId(), response.outcome(),
-                LogMask.maskPayloadType(uplink.getPayloadType()),
-                LogMask.maskPayloadType(response.downlinkPayloadType()),
-                response.downlinkPayload() == null ? 0 : response.downlinkPayload().length);
-        metrics.downlink("delivered");
-        return KeyprovRelayResult.delivered(uplink.getMessageId(), topic);
+            // 下行前再次校验目标身份未被替换（generation guard，fail-closed）
+            // 官方 wire 不再返回路由身份；VAGW 只以认证会话快照复核当前 active session（§2.6）
+            if (!sessionService.isGenerationCurrent(context.hsmUid(), context.connectionGeneration())) {
+                log.warn("keyprov downlink rejected: session replaced/stale, messageId={}, hsmUid={}",
+                        uplink.getMessageId(), LogMask.mask(context.hsmUid()));
+                inbox.forget(uplink.getMessageId());
+                metrics.downlink("not_delivered");
+                return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_SESSION_STALE, uplink.getMessageId());
+            }
+
+            byte[] downlinkBytes = envelopeFactory.buildDownlink(
+                    context, uplink, response.downlinkPayloadType(), response.downlinkPayload(),
+                    response.expireAtMs()).toByteArray();
+
+            String topic;
+            try {
+                topic = downlinkPublisher.publish(context.hsmUid(), downlinkBytes);
+            } catch (Exception e) {
+                log.error("keyprov downlink MQTT publish failed: messageId={}, hsmUid={}",
+                        uplink.getMessageId(), LogMask.mask(context.hsmUid()), e);
+                inbox.forget(uplink.getMessageId());
+                metrics.downlink("failed");
+                return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_DOWNLINK_PUBLISH_FAILED, uplink.getMessageId());
+            }
+
+            log.info("keyprov relayed: requestId={}, messageId={}, outcome={}, uplinkType={}, downlinkType={}, payloadBytes={}",
+                    uplink.getRequestId(), uplink.getMessageId(), response.outcome(),
+                    LogMask.maskPayloadType(uplink.getPayloadType()),
+                    LogMask.maskPayloadType(response.downlinkPayloadType()),
+                    response.downlinkPayload() == null ? 0 : response.downlinkPayload().length);
+            metrics.downlink("delivered");
+            return KeyprovRelayResult.delivered(uplink.getMessageId(), topic);
+        } finally {
+            // 任务终态（成功/失败/stale/deadline）立即释放 VMD 返回的敏感下行 payload 引用
+            if (response.downlinkPayload() != null) {
+                Arrays.fill(response.downlinkPayload(), (byte) 0);
+            }
+        }
     }
 
     private static KeyprovReason mapNoPayloadReason(KeyprovOutcome outcome) {

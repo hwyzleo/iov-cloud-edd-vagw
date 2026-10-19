@@ -84,7 +84,7 @@ public class SessionService {
             String json = objectMapper.writeValueAsString(session);
             redisTemplate.opsForValue().set(key, json, SESSION_TTL_HOURS, TimeUnit.HOURS);
 
-            log.info("Session online: deviceSn={}, vin={}, clientId={}, generation={}",
+            log.info("Session online: deviceUid={}, vin={}, clientId={}, generation={}",
                     deviceSn, vin, clientId, connectionGeneration);
         } catch (Exception e) {
             log.error("Failed to save session for deviceSn={}", deviceSn, e);
@@ -128,7 +128,7 @@ public class SessionService {
                 String updatedJson = objectMapper.writeValueAsString(session);
                 redisTemplate.opsForValue().set(key, updatedJson, SESSION_TTL_HOURS, TimeUnit.HOURS);
 
-                log.info("Session offline: deviceSn={}", deviceSn);
+                log.info("Session offline: deviceUid={}", deviceSn);
             }
         } catch (Exception e) {
             log.error("Failed to update session disconnect for deviceSn={}", deviceSn, e);

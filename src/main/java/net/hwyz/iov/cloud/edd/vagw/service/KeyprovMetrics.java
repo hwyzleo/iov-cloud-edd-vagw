@@ -27,6 +27,8 @@ public class KeyprovMetrics {
 
     private final Map<String, AtomicLong> counters = new ConcurrentHashMap<>();
     private final Map<String, AtomicLong> gauges = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicReference<String> readinessReason =
+            new java.util.concurrent.atomic.AtomicReference<>();
 
     private void increment(String name) {
         counters.computeIfAbsent(name, key -> new AtomicLong()).incrementAndGet();
@@ -89,6 +91,28 @@ public class KeyprovMetrics {
     /** 下行发布结果计数（delivered / duplicate / failed / not_delivered）。 */
     public void downlink(String result) {
         increment("keyprov_downlink_total{result=" + result + "}");
+    }
+
+    /**
+     * Keyprov readiness gauge（低基数）：{@code vagw_keyprov_ready{reason=...}} 1/0。
+     * <p>状态变化时把旧 reason 的 gauge 置 0，只保留当前 reason 为 1；不包含设备/租户/requestId。</p>
+     */
+    public void readiness(boolean ready, String reason) {
+        String normalized = reason == null ? "ready" : reason;
+        String key = "vagw_keyprov_ready{reason=" + normalized + "}";
+        String previous = readinessReason.getAndSet(normalized);
+        if (previous != null && !previous.equals(normalized)) {
+            AtomicLong old = gauges.get("vagw_keyprov_ready{reason=" + previous + "}");
+            if (old != null) {
+                old.set(0L);
+            }
+        }
+        gauge(key).set(ready ? 1L : 0L);
+    }
+
+    /** 当前 readiness reason（只用于日志/测试，不参与业务判断）。 */
+    public String readinessReason() {
+        return readinessReason.get();
     }
 
     public long get(String name) {

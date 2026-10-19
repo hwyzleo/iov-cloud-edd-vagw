@@ -22,6 +22,12 @@
         <protobuf.version>3.25.5</protobuf.version>
         <!-- PAR-PROTO release（EDD-VAGW-DSN-CR-006 锁定） -->
         <par-proto.version>0.0.1-SNAPSHOT</par-proto.version>
+        <!--
+            VMD CR-062 Keyprov API 版本（EDD-VAGW-DSN-CR-017）。
+            本地开发可先由 iov-cloud-edd-vmd 执行 `mvn -pl edd-vmd-api install`；
+            正式 release-set 必须替换为已发布、可追溯的非 SNAPSHOT 版本，
+            禁止依赖开发机 Maven Local 或回退到旧 CR-059 artifact（启动 readiness 另行校验）。
+        -->
         <edd-vmd-api.version>0.0.1-SNAPSHOT</edd-vmd-api.version>
         <testcontainers.version>1.19.8</testcontainers.version>
     </properties>
@@ -131,7 +137,68 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
                     <skip>false</skip>
+                    <!-- KeyprovProtocolLockTest 重新生成清单时与构建使用同一个 protoc 版本 -->
+                    <systemPropertyVariables>
+                        <keyprov.protoc.version>${protobuf.version}</keyprov.protoc.version>
+                    </systemPropertyVariables>
                 </configuration>
+            </plugin>
+            <!--
+                EDD-VAGW-DSN-CR-017 §4：从实际依赖制品生成只读 KeyprovProtocolLock 清单。
+                只在 process-classes 写 target/generated-resources，绝不改写 src/main/resources 基线；
+                输出确定性（无时间戳/绝对路径/用户名），CI 由 KeyprovProtocolLockTest 逐字节比对基线。
+                更新基线属于显式协议升级，不得由普通构建自动完成。
+            -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.6.3</version>
+                <executions>
+                    <execution>
+                        <id>generate-keyprov-protocol-lock</id>
+                        <phase>process-classes</phase>
+                        <goals>
+                            <goal>java</goal>
+                        </goals>
+                        <configuration>
+                            <mainClass>net.hwyz.iov.cloud.edd.vagw.build.KeyprovProtocolLockManifestGenerator</mainClass>
+                            <classpathScope>compile</classpathScope>
+                            <workingDirectory>${project.basedir}</workingDirectory>
+                            <systemProperties>
+                                <systemProperty>
+                                    <key>keyprov.protoc.version</key>
+                                    <value>${protobuf.version}</value>
+                                </systemProperty>
+                            </systemProperties>
+                            <arguments>
+                                <argument>${project.build.directory}/generated-resources/META-INF/vagw/keyprov-protocol-lock.json</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- 将生成的锁版清单放入运行时 classpath（覆盖仓库内审核基线副本）。 -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-generated-keyprov-protocol-lock</id>
+                        <phase>process-classes</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.outputDirectory}</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.build.directory}/generated-resources</directory>
+                                    <filtering>false</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

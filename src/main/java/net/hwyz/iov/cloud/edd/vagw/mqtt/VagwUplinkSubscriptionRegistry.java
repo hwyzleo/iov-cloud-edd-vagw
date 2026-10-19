@@ -117,7 +117,7 @@ public class VagwUplinkSubscriptionRegistry {
                         group, service, filter, subscription.getQos());
                 continue;
             }
-            if (CAPABILITY_GATED_SERVICES.contains(service) && !keyprovContractGuard.compatible()) {
+            if (CAPABILITY_GATED_SERVICES.contains(service) && !keyprovContractGuard.statusPathAvailable()) {
                 log.warn("VAGW uplink subscription capability NOT_READY: group={}, service={}, filter={}, reason={}",
                         group, service, filter, keyprovContractGuard.incompatibilityReason());
                 continue;
