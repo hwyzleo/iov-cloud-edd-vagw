@@ -34,6 +34,17 @@ spring:
 # 由 IOV-OTA 生产、VAGW 消费，消费组 edd-vagw-fota-downlink；
 # 协议 major 与 manifest 不一致时启动 fail-closed（ProtocolContractGuard）。
 iov:
+  # 组织自有 JSON java.time 时间契约（EDD-VAGW-DSN-CR-018 §5.2.3 / FW-WEB-DSN-CR-001 RD-001-1~5）：
+  # 兼容阶段显式固定 epoch-millis 写出：受管 java.time 字段（VAGW 当前全部为 Instant 绝对时刻）
+  # 输出 13 位 epoch 毫秒；读入由 FW-WEB IovJavaTimeReadModule 提供 ISO / 10 位秒 / 13 位毫秒双读。
+  # 配置仅启动生效，禁止经 Nacos 全局共享配置热翻转 mapper；未知 date-format 值启动失败。
+  # zone-id 为框架要求的显式业务 ZoneId：VAGW 当前无 LocalDateTime/OffsetDateTime JSON 字段，
+  # 该值不参与 Instant 字段的 epoch/ISO 转换，但仍是潜在 LDT/ODT 数字转换路径的实际策略，
+  # 新增此类字段时须重新核验时间语义，不得直接沿用（EDD-VAGW-DSN-CR-018 §5.2.3）。
+  web:
+    jackson:
+      date-format: epoch-millis
+      zone-id: Asia/Shanghai
   kafka:
     topic-provisioning:
       enabled: true    # FW-KAFKA：启动时检查并幂等创建 VAGW 生产的 4 个 FOTA Topic（CR-008 §3）
