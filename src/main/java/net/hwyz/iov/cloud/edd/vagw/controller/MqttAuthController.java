@@ -100,7 +100,7 @@ public class MqttAuthController {
                 LogMask.mask(deviceSn), request.getClientId());
 
         // 完整认证上下文（含本次 mTLS 叶子证书 Base64(DER)/PEM 与可信来源 IP）交给应用服务：
-        // 由 AuthAclServiceImpl 在调用 TSP 前构造证书上下文，Controller 不拼接 Base64/DER
+        // 由 AuthAclServiceImpl 在调用 VIAM 前构造证书上下文，Controller 不拼接 Base64/DER
         // （EDD-VAGW-DSN-CR-013 §6）。
         AuthAclService.AuthResult result = authAclService.authenticate(
                 deviceSn, request.getClientId(), request.getPeerCert(), request.getPeerHost());
@@ -111,10 +111,12 @@ public class MqttAuthController {
             // （EDD-VAGW-DSN-CR-013 §4.2，沿用既有契约，不新增副本）
             authenticatedIdentityStore.save(request.getClientId(), result.deviceSn(),
                     result.certSerial(), null);
-            // 保存准入候选快照并分配 connection generation（EDD-VAGW-DSN-CR-012 §3.1/§3.2）：
+            // 保存准入候选快照并分配 connection generation（EDD-VAGW-DSN-CR-012 §3.1/§3.2，
+            // CR-019 补充 VIAM decisionId/bindingVersion 证据）：
             // client.connected 仅允许关联本快照；保存失败即 fail-closed，不返回 allow，避免建立不可信会话
             if (admissionSessionContextRegistry.saveCandidate(result.deviceSn(), result.vin(), result.certSerial(),
-                    request.getClientId(), request.getPeerHost(), request.getProtoVer()).isEmpty()) {
+                    request.getClientId(), request.getPeerHost(), request.getProtoVer(),
+                    result.admissionDecisionId(), result.bindingVersion(), result.securityVersion()).isEmpty()) {
                 log.warn("Auth denied: admission context unavailable, deviceSn={}, clientId={}",
                         LogMask.mask(result.deviceSn()), request.getClientId());
                 metrics.incDeny(String.valueOf(ErrorCode.DEPENDENCY_UNAVAILABLE.getCode()));

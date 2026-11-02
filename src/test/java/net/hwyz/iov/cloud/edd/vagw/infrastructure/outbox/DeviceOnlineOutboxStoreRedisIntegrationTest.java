@@ -165,7 +165,8 @@ class DeviceOnlineOutboxStoreRedisIntegrationTest {
     private static DeviceOnlineEvent event(String eventId, long generation) {
         return new DeviceOnlineEvent(eventId, DeviceOnlineEvent.TYPE, HSM_UID, "VIN1",
                 "sess-1", generation, "CERT", null,
-                Instant.parse("2026-10-14T13:00:00Z"), DeviceOnlineEvent.TIME_SOURCE_EMQX);
+                Instant.parse("2026-10-14T13:00:00Z"), DeviceOnlineEvent.TIME_SOURCE_EMQX,
+                null, null, null, null, null);
     }
 
     private void flushAll() {

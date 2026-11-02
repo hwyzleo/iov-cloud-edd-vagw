@@ -26,7 +26,7 @@ class DeviceOnlineEventFactoryTest {
     void setUp() {
         factory = new DeviceOnlineEventFactory(new ObjectMapper().registerModule(new JavaTimeModule()));
         context = new AdmissionSessionContext("DEVICE-1", "VIN1", "CERT", "client1",
-                "10.0.0.1", 5, 12L, Instant.now(), Instant.now().plusSeconds(300));
+                "10.0.0.1", 5, 12L, Instant.now(), Instant.now().plusSeconds(300), "ADM-test", 1L, 0L);
     }
 
     private MqttEventRequest request(String sessionId, String node, Long ts) {
@@ -58,7 +58,7 @@ class DeviceOnlineEventFactoryTest {
         String base = factory.create(context, request("sess-1", "node-a", null), receivedAt).eventId();
         String otherSession = factory.create(context, request("sess-2", "node-a", null), receivedAt).eventId();
         AdmissionSessionContext otherGen = new AdmissionSessionContext("DEVICE-1", "VIN1", "CERT",
-                "client1", null, null, 13L, Instant.now(), Instant.now().plusSeconds(300));
+                "client1", null, null, 13L, Instant.now(), Instant.now().plusSeconds(300), "ADM-test", 1L, 0L);
         String otherGeneration = factory.create(otherGen, request("sess-1", "node-a", null), receivedAt).eventId();
 
         assertNotEquals(base, otherSession);
@@ -75,6 +75,25 @@ class DeviceOnlineEventFactoryTest {
 
         assertEquals(emqx, event.occurredAt());
         assertEquals(DeviceOnlineEvent.TIME_SOURCE_EMQX, event.timeSource());
+    }
+
+    @Test
+    @DisplayName("FR-019-04：事件携带 VIAM decisionId/bindingVersion 可信证据（对齐 DeviceOnlineEvidenceVo）")
+    void event_carriesAdmissionEvidenceFromContext() {
+        Instant receivedAt = Instant.parse("2026-10-12T12:00:00Z");
+
+        DeviceOnlineEvent event = factory.create(context, request("sess-1", "node-a", null), receivedAt);
+
+        // 证据字段来自 VIAM ALLOW 快照（admissionDecisionId 必填；snapshot 等效证据同源）
+        assertEquals("ADM-test", event.admissionDecisionId());
+        assertEquals(1L, event.bindingVersion());
+        assertEquals("VIN1", event.admissionVin());
+        assertEquals("CERT", event.admissionCertSerial());
+        assertNotNull(event.admissionSnapshotExpiresAt());
+        // eventId 派生输入不变（证据字段不参与 eventId，历史 bytes 稳定）
+        String expectedEventId = DeviceOnlineEventFactory.eventId(
+                "node-a", "sess-1", "DEVICE-1", context.connectionGeneration());
+        assertEquals(expectedEventId, event.eventId());
     }
 
     @Test

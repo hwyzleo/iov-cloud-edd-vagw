@@ -56,9 +56,9 @@ class MqttAuthControllerTest {
     void allowAdmissionContext() {
         AdmissionSessionContext context = new AdmissionSessionContext(
                 "DEVICE-SN-001", "VIN001", SERIAL, "client001", "10.0.0.8", 4, 1L,
-                Instant.now(), Instant.now().plusSeconds(300));
+                Instant.now(), Instant.now().plusSeconds(300), "ADM-mqtt-test", 7L, 0L);
         lenient().when(admissionSessionContextRegistry
-                .saveCandidate(any(), any(), any(), any(), any(), any()))
+                .saveCandidate(any(), any(), any(), any(), any(), any(), any(), any(), anyLong()))
                 .thenReturn(Optional.of(context));
     }
 
@@ -103,7 +103,8 @@ class MqttAuthControllerTest {
                         .build()
         );
         when(authAclService.authenticate("DEVICE-SN-001", "client001", PEM, "10.0.0.8"))
-                .thenReturn(AuthAclService.AuthResult.allow(acl, "DEVICE-SN-001", "VIN001", SERIAL));
+                .thenReturn(AuthAclService.AuthResult.allow(acl, "DEVICE-SN-001", "VIN001", SERIAL,
+                        "ADM-mqtt-test", 7L, 5L));
 
         ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
 
@@ -115,7 +116,7 @@ class MqttAuthControllerTest {
         // canonical serial 由叶子证书解析后固化，供会话快照/上线事件沿用（CR-013 §4.2）
         verify(authenticatedIdentityStore).save("client001", "DEVICE-SN-001", SERIAL, null);
         verify(admissionSessionContextRegistry).saveCandidate(
-                "DEVICE-SN-001", "VIN001", SERIAL, "client001", "10.0.0.8", 4);
+                "DEVICE-SN-001", "VIN001", SERIAL, "client001", "10.0.0.8", 4, "ADM-mqtt-test", 7L, 5L);
     }
 
     @Test
@@ -138,7 +139,7 @@ class MqttAuthControllerTest {
         assertTrue(response.getBody().getReason().contains("804016"));
         assertTrue(response.getBody().getReason().contains("PEM_MISSING"));
         verify(authenticatedIdentityStore, never()).save(any(), any(), any(), any());
-        verify(admissionSessionContextRegistry, never()).saveCandidate(any(), any(), any(), any(), any(), any());
+        verify(admissionSessionContextRegistry, never()).saveCandidate(any(), any(), any(), any(), any(), any(), any(), any(), anyLong());
     }
 
     @Test
@@ -234,10 +235,11 @@ class MqttAuthControllerTest {
     @Test
     void authenticate_admissionContextUnavailable_shouldFailClosed() {
         when(bypassGuard.isBypassAllowed(any())).thenReturn(false);
-        when(admissionSessionContextRegistry.saveCandidate(any(), any(), any(), any(), any(), any()))
+        when(admissionSessionContextRegistry.saveCandidate(any(), any(), any(), any(), any(), any(), any(), any(), anyLong()))
                 .thenReturn(Optional.empty());
         when(authAclService.authenticate("DEVICE-SN-001", "client001", PEM, "10.0.0.8"))
-                .thenReturn(AuthAclService.AuthResult.allow(List.of(), "DEVICE-SN-001", "VIN001", SERIAL));
+                .thenReturn(AuthAclService.AuthResult.allow(List.of(), "DEVICE-SN-001", "VIN001", SERIAL,
+                        "ADM-mqtt-test", 7L, 5L));
 
         ResponseEntity<MqttAuthResponse> response = controller.authenticate(
                 deviceRequest("DEVICE-SN-001", "DEVICE-SN-001"));

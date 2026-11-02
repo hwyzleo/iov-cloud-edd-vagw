@@ -48,7 +48,7 @@ class VagwDeviceOnlineTimeContractTest {
     private DeviceOnlineEvent sampleEvent() {
         return new DeviceOnlineEvent(
                 "evt-stable-1", DeviceOnlineEvent.TYPE, "DEVICE-1", "VIN1", "sess-1",
-                12L, "CERT", null, SAMPLE, DeviceOnlineEvent.TIME_SOURCE_EMQX);
+                12L, "CERT", null, SAMPLE, DeviceOnlineEvent.TIME_SOURCE_EMQX, null, null, null, null, null);
     }
 
     @Test
@@ -83,7 +83,7 @@ class VagwDeviceOnlineTimeContractTest {
     @DisplayName("eventId 派生不含 occurredAt：格式/时刻变化不改变幂等摘要")
     void eventId_notDerivedFromOccurredAt() {
         AdmissionSessionContext ctx = new AdmissionSessionContext(
-                "DEVICE-1", "VIN1", "CERT", "client1", "10.0.0.1", 5, 12L, SAMPLE, SAMPLE);
+                "DEVICE-1", "VIN1", "CERT", "client1", "10.0.0.1", 5, 12L, SAMPLE, SAMPLE, "ADM-test", 1L, 0L);
         ObjectMapper mapper = productionMapper();
         DeviceOnlineEventFactory factory = new DeviceOnlineEventFactory(mapper);
 

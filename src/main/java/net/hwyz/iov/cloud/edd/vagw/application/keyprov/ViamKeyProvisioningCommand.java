@@ -4,13 +4,13 @@ import net.hwyz.iov.cloud.edd.vagw.model.keyprov.BrokerAuthenticatedPublishConte
 import vehicle.common.v1.Envelope;
 
 /**
- * VMD keyprov relay 命令（EDD-VAGW-DSN-CR-016 §2.4）。
+ * VIAM keyprov relay 命令（EDD-VAGW-DSN-CR-016 §2.4）。
  * <p>
  * VAGW 应用层 Port 的输入：认证会话上下文 + canonical Envelope + canonical payload。
  * {@code canonicalPayload} 为敏感密文，只允许在单次处理调用栈及其有界内存任务中短暂存在。
  * </p>
  */
-public record VmdKeyProvisioningCommand(
+public record ViamKeyProvisioningCommand(
         BrokerAuthenticatedPublishContext context,
         Envelope.VehicleMessageEnvelope envelope,
         byte[] canonicalPayload) {
@@ -20,7 +20,7 @@ public record VmdKeyProvisioningCommand(
      */
     @Override
     public String toString() {
-        return "VmdKeyProvisioningCommand{hsmUid=" + (context == null ? null : context.hsmUid())
+        return "ViamKeyProvisioningCommand{hsmUid=" + (context == null ? null : context.hsmUid())
                 + ", messageId=" + (envelope == null ? null : envelope.getMessageId())
                 + ", requestId=" + (envelope == null ? null : envelope.getRequestId())
                 + ", payloadType=" + (envelope == null ? null : envelope.getPayloadType())

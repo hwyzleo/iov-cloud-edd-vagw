@@ -93,7 +93,7 @@ class KeyprovProtocolLockTest {
         assertTrue(readiness.descriptorSetHashMatched());
         assertTrue(readiness.packageServiceProtocolRegistryMatched());
         assertTrue(readiness.generatedRuntimeSelfCheckPassed());
-        assertTrue(readiness.vmdCr062ApiCompatible());
+        assertTrue(readiness.viamApiCompatible());
         assertTrue(readiness.keyprovAckCr008AdapterReady());
         assertTrue(readiness.canonicalPayloadPassthroughReady());
         assertTrue(readiness.importProofSensitiveLoggingGuardReady());

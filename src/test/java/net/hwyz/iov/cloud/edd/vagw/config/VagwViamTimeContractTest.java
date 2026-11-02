@@ -2,7 +2,7 @@ package net.hwyz.iov.cloud.edd.vagw.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
-import net.hwyz.iov.cloud.edd.vagw.infrastructure.client.TspResolveResult;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.client.ViamResolveResult;
 import net.hwyz.iov.cloud.framework.web.autoconfigure.IovJacksonAutoConfiguration;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -15,23 +15,23 @@ import java.time.Instant;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * TSP Feign 时间契约双向测试（EDD-VAGW-DSN-CR-018 §5.2.1/§5.2.4）。
+ * VIAM Feign 时间契约双向测试（EDD-VAGW-DSN-CR-018 §5.2.1/§5.2.4，owner 由 EDD-VAGW-DSN-CR-019 切换 VIAM）。
  * <p>
- * iov-tsp-api VO（DeviceAdmissionCheckVo.ts / DeviceAdmissionResultVo.updatedAt /
+ * iov-tsp-api 与 sec-viam-api VO（DeviceAdmissionCheckVo.ts / DeviceAdmissionResultVo.updatedAt /
  * VehicleAccessIdentityResultVo.bindingUpdatedAt）均为 {@code java.time.Instant}，经
  * OpenFeign 默认 HttpMessageConverters → Spring ObjectMapper（即本测试装配的生产 mapper）
  * 编解码。本测试在 mapper 层验证真实 VO 的双向 wire 契约：
  * <ul>
- *   <li>出站 {@code ts}：兼容阶段输出 13 位 epoch 毫秒（TSP InstantEpochMilliDeserializer
+ *   <li>出站 {@code ts}：兼容阶段输出 13 位 epoch 毫秒（VIAM InstantEpochMilliDeserializer
  *       数字一律按 epoch 毫秒解析，13 位正确、10 位 epoch 秒会被误读为 1970——旧回归点）；</li>
  *   <li>入站 {@code updatedAt}/{@code bindingUpdatedAt}：ISO 字符串 / 10 位秒 / 13 位毫秒
- *       双读归一到同一 Instant（TSP 切换 ISO 后 VAGW 仍可读）。</li>
+ *       双读归一到同一 Instant（VIAM 切换 ISO 后 VAGW 仍可读）。</li>
  * </ul>
  * 真实 Feign 端到端调用属联调/部署验证项（§5.2.6 门禁），本测试不伪造“已部署双读签收”。
  * </p>
  */
-@DisplayName("TSP Feign 时间契约双向测试（CR-018）")
-class VagwTspTimeContractTest {
+@DisplayName("VIAM Feign 时间契约双向测试（CR-018）")
+class VagwViamTimeContractTest {
 
     private static final Instant SAMPLE = Instant.parse("2026-10-28T12:43:32.823Z");
     private static final String ZONE = "iov.web.jackson.zone-id=Asia/Shanghai";
@@ -91,17 +91,17 @@ class VagwTspTimeContractTest {
     @DisplayName("入站 bindingUpdatedAt：ISO / 数字双读，安全事实映射不变")
     void inboundBindingUpdatedAt_dualRead() throws Exception {
         ObjectMapper mapper = productionMapper();
-        TspResolveResult fromIso = mapResolve(mapper,
-                "{\"status\":\"RESOLVED\",\"vin\":\"VIN1\",\"hsmUid\":\"DEVICE-1\",\"tboxSn\":\"SN1\","
+        ViamResolveResult fromIso = mapResolve(mapper,
+                "{\"status\":\"RESOLVED\",\"vin\":\"VIN1\",\"hsmUid\":\"DEVICE-1\",\"principalId\":\"PR-1\",\"tboxSn\":\"SN1\","
                         + "\"bindingVersion\":3,\"bindingUpdatedAt\":\"2026-10-28T12:43:32.823Z\"}");
-        TspResolveResult fromMillis = mapResolve(mapper,
-                "{\"status\":\"RESOLVED\",\"vin\":\"VIN1\",\"hsmUid\":\"DEVICE-1\",\"tboxSn\":\"SN1\","
+        ViamResolveResult fromMillis = mapResolve(mapper,
+                "{\"status\":\"RESOLVED\",\"vin\":\"VIN1\",\"hsmUid\":\"DEVICE-1\",\"principalId\":\"PR-1\",\"tboxSn\":\"SN1\","
                         + "\"bindingVersion\":3,\"bindingUpdatedAt\":" + SAMPLE.toEpochMilli() + "}");
-        TspResolveResult fromSeconds = mapResolve(mapper,
-                "{\"status\":\"RESOLVED\",\"vin\":\"VIN1\",\"hsmUid\":\"DEVICE-1\",\"tboxSn\":\"SN1\","
+        ViamResolveResult fromSeconds = mapResolve(mapper,
+                "{\"status\":\"RESOLVED\",\"vin\":\"VIN1\",\"hsmUid\":\"DEVICE-1\",\"principalId\":\"PR-1\",\"tboxSn\":\"SN1\","
                         + "\"bindingVersion\":3,\"bindingUpdatedAt\":" + SAMPLE.getEpochSecond() + "}");
 
-        assertThat(fromIso.getStatus()).isEqualTo(TspResolveResult.Status.RESOLVED);
+        assertThat(fromIso.getStatus()).isEqualTo(ViamResolveResult.Status.RESOLVED);
         assertThat(fromIso.getBindingUpdatedAt()).isEqualTo(SAMPLE);
         assertThat(fromMillis.getBindingUpdatedAt()).isEqualTo(SAMPLE);
         // 10 位秒：仅秒级精度
@@ -123,20 +123,21 @@ class VagwTspTimeContractTest {
                 mapper.readValue("{\"updatedAt\":null}", TspResultHolder.class).updatedAt);
     }
 
-    // ---------- 辅助：映射 VehicleAccessIdentityResultVo → TspResolveResult（复用既有映射语义） ----------
+    // ---------- 辅助：映射 VehicleAccessIdentityResultVo → ViamResolveResult（复用既有映射语义） ----------
 
-    private TspResolveResult mapResolve(ObjectMapper mapper, String json) throws Exception {
+    private ViamResolveResult mapResolve(ObjectMapper mapper, String json) throws Exception {
         JsonNode vo = mapper.readTree(json);
         assertThat(vo.get("status").asText()).isEqualTo("RESOLVED");
         assertThat(vo.get("hsmUid").asText()).isNotBlank();
         assertThat(vo.get("tboxSn").asText()).isNotBlank();
         assertThat(vo.get("bindingVersion").isNumber()).isTrue();
         Instant bindingUpdatedAt = mapper.treeToValue(vo.get("bindingUpdatedAt"), Instant.class);
-        return TspResolveResult.resolved(vo.get("vin").asText(), vo.get("hsmUid").asText(),
-                vo.get("tboxSn").asText(), vo.get("bindingVersion").longValue(), bindingUpdatedAt);
+        return ViamResolveResult.resolved(vo.get("vin").asText(), vo.get("hsmUid").asText(),
+                vo.get("principalId").asText(), vo.get("tboxSn").asText(),
+                vo.get("bindingVersion").longValue(), bindingUpdatedAt);
     }
 
-    // ---------- 辅助 DTO（结构与 iov-tsp-api VO 字段一致） ----------
+    // ---------- 辅助 DTO（结构与 sec-viam-api VO 字段一致） ----------
 
     static class TspCheckVoHolder {
         public Instant ts;

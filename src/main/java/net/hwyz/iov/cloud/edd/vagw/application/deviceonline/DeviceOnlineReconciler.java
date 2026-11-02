@@ -89,6 +89,9 @@ public class DeviceOnlineReconciler {
                 session.getCertSerial(),
                 null,
                 occurredAt,
-                DeviceOnlineEvent.TIME_SOURCE_VAGW_RECEIVED);
+                DeviceOnlineEvent.TIME_SOURCE_VAGW_RECEIVED,
+                // CR-019 §4.4：对账重建事件无 VIAM decisionId 证据（SessionInfo 不承载），
+                // 证据字段保持 null → VIAM EvidenceCheck 拒绝/隔离，不自动升级为已验证成功事实
+                null, null, null, null, null);
     }
 }

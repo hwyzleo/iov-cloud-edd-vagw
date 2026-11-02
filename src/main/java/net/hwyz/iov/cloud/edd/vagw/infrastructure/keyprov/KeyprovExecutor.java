@@ -98,14 +98,14 @@ public class KeyprovExecutor {
         }
     }
 
-    /** 专属线程命名：{@code keyprov-vmd-<n>}；不继承任何任务上下文。 */
+    /** 专属线程命名：{@code keyprov-viam-<n>}；不继承任何任务上下文。 */
     private static final class KeyprovThreadFactory implements ThreadFactory {
 
         private final AtomicInteger counter = new AtomicInteger(1);
 
         @Override
         public Thread newThread(Runnable r) {
-            Thread thread = new Thread(r, "keyprov-vmd-" + counter.getAndIncrement());
+            Thread thread = new Thread(r, "keyprov-viam-" + counter.getAndIncrement());
             thread.setDaemon(true);
             return thread;
         }

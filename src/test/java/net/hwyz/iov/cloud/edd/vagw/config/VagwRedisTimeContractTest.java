@@ -76,7 +76,7 @@ class VagwRedisTimeContractTest {
         ObjectMapper mapper = productionMapper();
 
         AdmissionSessionContext context = new AdmissionSessionContext(
-                "DEVICE-1", "VIN1", "CERT", "client1", "10.0.0.1", 5, 12L, SAMPLE, SAMPLE.plusSeconds(300));
+                "DEVICE-1", "VIN1", "CERT", "client1", "10.0.0.1", 5, 12L, SAMPLE, SAMPLE.plusSeconds(300), "ADM-test", 1L, 0L);
 
         String legacyIso = "{\"hsmUid\":\"DEVICE-1\",\"vin\":\"VIN1\",\"certSerial\":\"CERT\","
                 + "\"clientId\":\"client1\",\"sourceIp\":\"10.0.0.1\",\"protoVer\":5,"
@@ -100,14 +100,17 @@ class VagwRedisTimeContractTest {
 
         VehicleAccessBinding binding = VehicleAccessBinding.builder()
                 .vin("VIN1").hsmUid("DEVICE-1").bindingVersion(3L).bindingUpdatedAt(SAMPLE)
-                .source(net.hwyz.iov.cloud.edd.vagw.model.binding.BindingSource.ADMISSION)
+                .source(net.hwyz.iov.cloud.edd.vagw.model.binding.BindingSource.VIAM_ADMISSION)
                 .build();
 
+        // CR-019 §4.2 兼容：旧缓存 source=ADMISSION/TSP 在切换后反序列化失败 →
+        // readCache 未命中 → 回源 VIAM 重新解析（来源不明/版本不可验证的旧缓存不继续使用）
         String legacyIso = "{\"vin\":\"VIN1\",\"hsmUid\":\"DEVICE-1\",\"bindingVersion\":3,"
                 + "\"bindingUpdatedAt\":\"2026-10-28T12:43:32.823Z\","
                 + "\"source\":\"ADMISSION\"}";
-        VehicleAccessBinding fromLegacy = mapper.readValue(legacyIso, VehicleAccessBinding.class);
-        assertThat(fromLegacy.getBindingUpdatedAt()).isEqualTo(SAMPLE);
+        org.junit.jupiter.api.Assertions.assertThrows(
+                com.fasterxml.jackson.databind.exc.InvalidFormatException.class,
+                () -> mapper.readValue(legacyIso, VehicleAccessBinding.class));
 
         String written = mapper.writeValueAsString(binding);
         assertThat(written).contains("\"bindingUpdatedAt\":" + SAMPLE.toEpochMilli());

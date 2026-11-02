@@ -23,12 +23,12 @@
         <!-- PAR-PROTO release（EDD-VAGW-DSN-CR-006 锁定） -->
         <par-proto.version>0.0.1-SNAPSHOT</par-proto.version>
         <!--
-            VMD CR-062 Keyprov API 版本（EDD-VAGW-DSN-CR-017）。
-            本地开发可先由 iov-cloud-edd-vmd 执行 `mvn -pl edd-vmd-api install`；
-            正式 release-set 必须替换为已发布、可追溯的非 SNAPSHOT 版本，
-            禁止依赖开发机 Maven Local 或回退到旧 CR-059 artifact（启动 readiness 另行校验）。
+            VIAM 官方安全契约 API 版本（EDD-VAGW-DSN-CR-019 §18 例外登记）。
+            当前为“仅开发使用、锁定源码提交与实际构件、禁止进入正式 release-set”的
+            有限例外构件（iov-cloud-sec-viam @ 6d45748，jar SHA-256 见 CR-019 §18）；
+            正式版本发布后必须替换为非 SNAPSHOT 并重跑契约测试，替换前不得进入正式发布门禁。
         -->
-        <edd-vmd-api.version>0.0.1-SNAPSHOT</edd-vmd-api.version>
+        <sec-viam-api.version>0.0.1-SNAPSHOT</sec-viam-api.version>
         <testcontainers.version>1.19.8</testcontainers.version>
     </properties>
 
@@ -93,19 +93,14 @@
             <artifactId>proto-keyprov</artifactId>
             <version>${par-proto.version}</version>
         </dependency>
-        <!-- TSP API: device admission service -->
+        <!-- TSP API: device admission service（EDD-VAGW-DSN-CR-019 已迁 VIAM，无合法剩余引用，已删除） -->
+        <!-- VMD API: Keyprov Service Feign 契约（EDD-VAGW-DSN-CR-019 已迁 VIAM，无合法剩余引用，已删除） -->
+        <!-- VIAM API: 官方安全契约（decide/resolve/Keyprov/上线证据，EDD-VAGW-DSN-CR-019）。
+             仅依赖已发布 artifact，不复制 Feign/VO/enum/fallback。版本见上方例外登记。 -->
         <dependency>
-            <groupId>net.hwyz.iov.cloud.iov</groupId>
-            <artifactId>iov-tsp-api</artifactId>
-            <version>0.0.1-SNAPSHOT</version>
-        </dependency>
-        <!-- VMD API: 官方 Keyprov Service Feign 契约（EDD-VAGW-DSN-CR-016 §2.4 / VMD-DSN-CR-059）。
-             VAGW 直接注入官方 VmdKeyProvisioningService（request／ack／status 三端点），本地仅保留 Gateway Port/Adapter；
-             不得依赖 edd-vmd-service 实现，不得复制 Feign 接口、URL、wire DTO 或 fallback。 -->
-        <dependency>
-            <groupId>net.hwyz.iov.cloud.edd</groupId>
-            <artifactId>edd-vmd-api</artifactId>
-            <version>${edd-vmd-api.version}</version>
+            <groupId>net.hwyz.iov.cloud.sec</groupId>
+            <artifactId>sec-viam-api</artifactId>
+            <version>${sec-viam-api.version}</version>
         </dependency>
         <!-- Test -->
         <dependency>

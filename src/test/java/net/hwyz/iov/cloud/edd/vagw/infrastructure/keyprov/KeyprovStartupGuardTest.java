@@ -1,7 +1,7 @@
 package net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov;
 
 import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
-import net.hwyz.iov.cloud.edd.vmd.api.service.VmdKeyProvisioningService;
+import net.hwyz.iov.cloud.sec.viam.api.service.ViamKeyProvisioningService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.ObjectProvider;
 
@@ -21,7 +21,7 @@ class KeyprovStartupGuardTest {
         KeyprovProperties properties = new KeyprovProperties();
         properties.setMaxInFlight(4);
         properties.setQueueCapacity(0);
-        properties.getVmd().setDeadline(Duration.ofSeconds(2));
+        properties.getViam().setDeadline(Duration.ofSeconds(2));
         properties.getCircuitBreaker().setFailureWindow(Duration.ofSeconds(30));
         properties.getCircuitBreaker().setOpenDuration(Duration.ofSeconds(15));
         properties.getCircuitBreaker().setHalfOpenProbes(2);
@@ -30,9 +30,9 @@ class KeyprovStartupGuardTest {
 
     @SuppressWarnings("unchecked")
     private static KeyprovStartupGuard guard(KeyprovProperties properties, boolean withOfficialBean) {
-        ObjectProvider<VmdKeyProvisioningService> provider = mock(ObjectProvider.class);
+        ObjectProvider<ViamKeyProvisioningService> provider = mock(ObjectProvider.class);
         when(provider.getIfAvailable()).thenReturn(
-                withOfficialBean ? mock(VmdKeyProvisioningService.class) : null);
+                withOfficialBean ? mock(ViamKeyProvisioningService.class) : null);
         return new KeyprovStartupGuard(properties, provider);
     }
 
@@ -56,7 +56,7 @@ class KeyprovStartupGuardTest {
     @Test
     void missingDeadline_shouldFailFast() {
         KeyprovProperties properties = validProperties();
-        properties.getVmd().setDeadline(null);
+        properties.getViam().setDeadline(null);
         assertThrows(IllegalStateException.class, () -> guard(properties, true).validate());
     }
 

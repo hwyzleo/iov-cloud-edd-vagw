@@ -51,12 +51,14 @@ class AdmissionSessionContextRegistryTest {
         when(valueOperations.increment("vagw:session:gen:DEVICE-1")).thenReturn(7L);
 
         Optional<AdmissionSessionContext> saved = registry.saveCandidate(
-                " device-1 ", "VIN1", "CERT", "client1", "10.0.0.1", 5);
+                " device-1 ", "VIN1", "CERT", "client1", "10.0.0.1", 5, "ADM-test", 1L, 0L);
 
         assertTrue(saved.isPresent());
         assertEquals("DEVICE-1", saved.get().hsmUid());
         assertEquals("VIN1", saved.get().vin());
         assertEquals(7L, saved.get().connectionGeneration());
+        assertEquals("ADM-test", saved.get().admissionDecisionId());
+        assertEquals(1L, saved.get().bindingVersion());
         assertTrue(saved.get().expiresAt().isAfter(saved.get().admittedAt()));
         verify(valueOperations).set(eq("vagw:auth:admission:client1"), anyString(),
                 eq(properties.getAdmissionTtlSeconds()), eq(TimeUnit.SECONDS));
@@ -69,7 +71,7 @@ class AdmissionSessionContextRegistryTest {
         doThrow(new RuntimeException("redis down")).when(valueOperations)
                 .set(anyString(), anyString(), anyLong(), any());
 
-        assertTrue(registry.saveCandidate("DEVICE-1", "VIN1", "CERT", "client1", null, null).isEmpty());
+        assertTrue(registry.saveCandidate("DEVICE-1", "VIN1", "CERT", "client1", null, null, "ADM-test", 1L, 0L).isEmpty());
     }
 
     @Test
@@ -77,7 +79,7 @@ class AdmissionSessionContextRegistryTest {
     void findCandidate_shouldMatchNormalizedIdentity() throws Exception {
         AdmissionSessionContext context = new AdmissionSessionContext(
                 "DEVICE-1", "VIN1", "CERT", "client1", null, null, 3L, Instant.now(),
-                Instant.now().plusSeconds(300));
+                Instant.now().plusSeconds(300), "ADM-test", 1L, 0L);
         when(valueOperations.get("vagw:auth:admission:client1"))
                 .thenReturn(objectMapper.writeValueAsString(context));
 
@@ -92,7 +94,7 @@ class AdmissionSessionContextRegistryTest {
     void findCandidate_identityMismatch_shouldReturnEmpty() throws Exception {
         AdmissionSessionContext context = new AdmissionSessionContext(
                 "DEVICE-1", "VIN1", "CERT", "client1", null, null, 3L, Instant.now(),
-                Instant.now().plusSeconds(300));
+                Instant.now().plusSeconds(300), "ADM-test", 1L, 0L);
         when(valueOperations.get("vagw:auth:admission:client1"))
                 .thenReturn(objectMapper.writeValueAsString(context));
 

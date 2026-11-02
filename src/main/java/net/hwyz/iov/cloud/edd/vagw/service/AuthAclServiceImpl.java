@@ -11,13 +11,13 @@ import net.hwyz.iov.cloud.edd.vagw.infrastructure.security.PeerCertificateExcept
 import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttAuthResponse;
 import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
 import net.hwyz.iov.cloud.edd.vagw.model.security.VerifiedPeerCertificate;
-import net.hwyz.iov.cloud.iov.tsp.api.service.TspDeviceAdmissionService;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionCheckVo;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionResultVo;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.AdmissionDecision;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.AdmissionReason;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.BindStatus;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.CertificateStatus;
+import net.hwyz.iov.cloud.sec.viam.api.service.ViamDeviceAdmissionService;
+import net.hwyz.iov.cloud.sec.viam.api.vo.DeviceAdmissionCheckVo;
+import net.hwyz.iov.cloud.sec.viam.api.vo.DeviceAdmissionResultVo;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.AdmissionDecision;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.AdmissionReason;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.BindStatus;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.CertificateStatus;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -28,12 +28,12 @@ import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
- * 认证ACL服务实现（EDD-VAGW-DSN-CR-009 / EDD-VAGW-DSN-CR-013）。
+ * 认证ACL服务实现（EDD-VAGW-DSN-CR-009 / EDD-VAGW-DSN-CR-013，由 EDD-VAGW-DSN-CR-019 切换 VIAM）。
  * <p>
- * 在调用 TSP 准入裁决前，由 {@link PeerCertificateContextFactory} 从 EMQX 透传的叶子证书
+ * 在调用 VIAM 准入裁决前，由 {@link PeerCertificateContextFactory} 从 EMQX 透传的叶子证书
  * （{@code ${cert_pem}} 原样值，标准 Base64(DER) 或严格 PEM）构造瞬时证书上下文
  * （serial/fingerprint/Base64 DER），任一异常 fail-closed；
- * 适配 TSP-DSN-CR-011 canonical {@code /decide} 与新 VO 枚举。
+ * 适配 sec-viam-api 官方 {@code /decide} 契约（D-019-02，VO 同构）。
  * </p>
  */
 @Slf4j
@@ -50,7 +50,7 @@ public class AuthAclServiceImpl implements AuthAclService {
      */
     private static final List<String> DEVICE_SERVICES = List.of("fota", "remotecontrol", "remotecontrol_ack");
 
-    private final TspDeviceAdmissionService tspDeviceAdmissionService;
+    private final ViamDeviceAdmissionService viamDeviceAdmissionService;
     private final BindingService bindingService;
     private final KeyprovProperties keyprovProperties;
     private final KeyprovContractGuard keyprovContractGuard;
@@ -79,7 +79,7 @@ public class AuthAclServiceImpl implements AuthAclService {
             return AuthResult.deny(ErrorCode.AUTH_IDENTITY_MISMATCH, "ADMISSION_NOT_READY");
         }
 
-        // 调用 TSP 前构造证书上下文：缺失/畸形/超限/多证书/私钥/CN 不一致均 fail-closed（不调用 TSP）
+        // 调用 VIAM 前构造证书上下文：缺失/畸形/超限/多证书/私钥/CN 不一致均 fail-closed（不调用 VIAM）
         VerifiedPeerCertificate certificate;
         try {
             certificate = peerCertificateContextFactory.create(peerCertPem, normalizedDeviceSn);
@@ -102,19 +102,19 @@ public class AuthAclServiceImpl implements AuthAclService {
 
         try {
             long startedAt = System.nanoTime();
-            DeviceAdmissionResultVo result = tspDeviceAdmissionService.decide(checkVo);
-            metrics.recordTspAdmissionLatency((System.nanoTime() - startedAt) / 1_000_000L);
+            DeviceAdmissionResultVo result = viamDeviceAdmissionService.decide(checkVo);
+            metrics.recordViamAdmissionLatency((System.nanoTime() - startedAt) / 1_000_000L);
             return evaluate(result, normalizedDeviceSn, certificate.canonicalSerial());
         } catch (Exception e) {
-            // TSP 超时/网络异常/5xx/反序列化失败 → fail-closed，保留 cause 供受控诊断（不落证书正文）
-            metrics.incTspAdmission("DENY", AdmissionReason.DEPENDENCY_UNAVAILABLE.name());
-            log.error("Auth failed: TSP admission error for deviceSn={}", LogMask.mask(normalizedDeviceSn), e);
+            // VIAM 超时/网络异常/5xx/反序列化失败 → fail-closed，保留 cause 供受控诊断（不落证书正文）
+            metrics.incViamAdmission("DENY", AdmissionReason.DEPENDENCY_UNAVAILABLE.name());
+            log.error("Auth failed: VIAM admission error for deviceSn={}", LogMask.mask(normalizedDeviceSn), e);
             return AuthResult.deny(ErrorCode.DEVICE_BLOCKED, AdmissionReason.DEPENDENCY_UNAVAILABLE.name());
         }
     }
 
     /**
-     * 裁决结果映射（EDD-VAGW-DSN-CR-013 §5）：
+     * 裁决结果映射（EDD-VAGW-DSN-CR-013 §5，owner 由 EDD-VAGW-DSN-CR-019 切换 VIAM）：
      * UID_UNKNOWN/UNBOUND/BINDING_CONFLICT → 804001；其余 DENY/依赖不可用/响应非法 → 804002。
      */
     private AuthResult evaluate(DeviceAdmissionResultVo result, String deviceSn, String canonicalSerial) {
@@ -123,29 +123,34 @@ public class AuthAclServiceImpl implements AuthAclService {
         }
 
         if (result.getDecision() == AdmissionDecision.ALLOW) {
-            // ALLOW 必要状态字段完整性校验：缺失即视为响应非法，fail-closed
+            // ALLOW 必要状态字段完整性校验：缺失即视为响应非法，fail-closed。
+            // admissionDecisionId 为 FR-019-04 可信证据：VIAM decide 每次调用均生成并返回，
+            // 缺失/空视为响应非法（禁止从客户端构造伪 decisionId 或省略证据）。
             if (result.getReason() != AdmissionReason.NONE
                     || isBlank(result.getVin())
                     || result.getBindStatus() != BindStatus.BOUND
                     || result.getCertStatus() != CertificateStatus.VALID
                     || result.getDeviceStatus() == null
                     || result.getBindVersion() == null
-                    || result.getUpdatedAt() == null) {
+                    || result.getUpdatedAt() == null
+                    || isBlank(result.getAdmissionDecisionId())) {
                 return denyDependency(deviceSn, "INCOMPLETE_ADMISSION_ALLOW");
             }
 
-            metrics.incTspAdmission("ALLOW", AdmissionReason.NONE.name());
+            metrics.incViamAdmission("ALLOW", AdmissionReason.NONE.name());
             // 准入成功后建立本次会话 hsm_uid ↔ VIN 双向绑定（EDD-VAGW-DSN-CR-007 §4.2），
-            // 版本号由 TSP-DSN-CR-011 准入接口返回
+            // 版本号与 decisionId 由 VIAM 准入接口返回；decisionId 进入准入快照作为
+            // 成功接入证据（FR-019-04）。
             bindingService.rememberAdmission(deviceSn, result.getVin(), result.getBindVersion());
             List<MqttAuthResponse.AclRule> acl = buildAcl(deviceSn);
             log.info("Auth success: deviceSn={}, vin={}", LogMask.mask(deviceSn), LogMask.mask(result.getVin()));
-            return AuthResult.allow(acl, deviceSn, result.getVin(), canonicalSerial);
+            return AuthResult.allow(acl, deviceSn, result.getVin(), canonicalSerial,
+                    result.getAdmissionDecisionId(), result.getBindVersion(), result.getSecurityVersion());
         }
 
         AdmissionReason reason = result.getReason();
         ErrorCode errorCode = mapReasonToErrorCode(reason);
-        metrics.incTspAdmission("DENY", reason == null ? "UNKNOWN" : reason.name());
+        metrics.incViamAdmission("DENY", reason == null ? "UNKNOWN" : reason.name());
         log.warn("Auth denied: deviceSn={}, reason={}, errorCode={}",
                 LogMask.mask(deviceSn), reason, errorCode);
         return AuthResult.deny(errorCode, reason == null ? "UNKNOWN_REASON" : reason.name());
@@ -155,14 +160,14 @@ public class AuthAclServiceImpl implements AuthAclService {
      * 依赖不可用 / 响应非法 / 未知 reason 统一 804002，不得伪装为证书已吊销或降级为 ALLOW。
      */
     private AuthResult denyDependency(String deviceSn, String detail) {
-        metrics.incTspAdmission("DENY", AdmissionReason.DEPENDENCY_UNAVAILABLE.name());
-        log.warn("Auth denied: TSP admission unusable, deviceSn={}, detail={}", LogMask.mask(deviceSn), detail);
+        metrics.incViamAdmission("DENY", AdmissionReason.DEPENDENCY_UNAVAILABLE.name());
+        log.warn("Auth denied: VIAM admission unusable, deviceSn={}, detail={}", LogMask.mask(deviceSn), detail);
         return AuthResult.deny(ErrorCode.DEVICE_BLOCKED,
                 AdmissionReason.DEPENDENCY_UNAVAILABLE.name() + ":" + detail);
     }
 
     /**
-     * 映射 TSP 裁决原因到网关错误码（EDD-VAGW-DSN-CR-013 §5 / TSP-DSN-CR-011 §4.4）：
+     * 映射 VIAM 裁决原因到网关错误码（EDD-VAGW-DSN-CR-013 §5，owner 由 CR-019 切换）：
      * UID_UNKNOWN/UNBOUND/BINDING_CONFLICT → 804001；IDENTITY_MISMATCH → 804016；
      * 其余证书状态/依赖不可用/未知 reason → 804002（fail-closed）。
      */
@@ -175,7 +180,7 @@ public class AuthAclServiceImpl implements AuthAclService {
             case IDENTITY_MISMATCH -> ErrorCode.AUTH_IDENTITY_MISMATCH;
             case CERT_REVOKED, CERT_EXPIRED, DEVICE_BLOCKED, DEVICE_RETIRED,
                  DEPENDENCY_UNAVAILABLE, NONE -> ErrorCode.DEVICE_BLOCKED;
-            // 未知 reason（含后续 iov-tsp-api 新增枚举）一律 fail-closed 至 804002
+            // 未知 reason（含后续 sec-viam-api 新增枚举）一律 fail-closed 至 804002
             default -> ErrorCode.DEVICE_BLOCKED;
         };
     }

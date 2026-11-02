@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.LogMask;
-import net.hwyz.iov.cloud.edd.vagw.infrastructure.client.TspResolveResult;
-import net.hwyz.iov.cloud.edd.vagw.infrastructure.client.TspVehicleAccessIdentityClient;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.client.ViamResolveResult;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.client.ViamVehicleAccessIdentityClient;
 import net.hwyz.iov.cloud.edd.vagw.model.binding.BindingSource;
 import net.hwyz.iov.cloud.edd.vagw.model.binding.VehicleAccessBinding;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,12 +18,13 @@ import java.time.Instant;
 import java.util.Optional;
 
 /**
- * 设备绑定解析服务实现（EDD-VAGW-DSN-CR-007 §4/§5）。
+ * 设备绑定解析服务实现（EDD-VAGW-DSN-CR-007 §4/§5，owner 由 EDD-VAGW-DSN-CR-019 切换 VIAM）。
  * <p>
- * VIN → hsmUid 解析：版本化缓存（有界 TTL）→ 未命中回源 TSP resolveByVin → 校验后原子写入双向缓存。
+ * VIN → hsmUid 解析：版本化缓存（有界 TTL）→ 未命中回源 VIAM resolveByVin → 校验后原子写入双向缓存。
  * hsmUid → VIN：优先使用准入成功时写入的会话绑定缓存，不依赖外部预热 Redis；
  * 映射意外缺失返回 CONTEXT_MISSING（基础设施状态），不得误记为真实 UNBOUND。
- * Redis 不可用或写失败仅影响加速，不伪造未绑定；TSP 绑定投影是权威查询入口。
+ * Redis 不可用或写失败仅影响加速，不伪造未绑定；VIAM 绑定投影是权威查询入口。
+ * 切换后旧 TSP/ADMISSION 来源缓存反序列化失败即视为未命中并回源（§4.2 兼容）。
  * </p>
  */
 @Slf4j
@@ -35,7 +36,7 @@ public class BindingServiceImpl implements BindingService {
     private static final String HSM_KEY_PREFIX = "vagw:binding:hsm:";
 
     private final StringRedisTemplate redisTemplate;
-    private final TspVehicleAccessIdentityClient tspClient;
+    private final ViamVehicleAccessIdentityClient viamClient;
     private final ObjectMapper objectMapper;
 
     @Value("${vagw.binding.cache-ttl-seconds:300}")
@@ -57,9 +58,9 @@ public class BindingServiceImpl implements BindingService {
                         LogMask.mask(cached.get().getHsmUid()));
                 return BindingResolution.resolved(cached.get());
             }
-            // 缓存未命中 → TSP 回源
-            log.debug("Binding cache miss (vin), fallback to TSP: vin={}", LogMask.mask(vin));
-            return mapTspResult(tspClient.resolveByVin(vin));
+            // 缓存未命中 → VIAM 回源
+            log.debug("Binding cache miss (vin), fallback to VIAM: vin={}", LogMask.mask(vin));
+            return mapViamResult(viamClient.resolveByVin(vin));
         } catch (Exception e) {
             log.error("Failed to resolve binding by vin={}", LogMask.mask(vin), e);
             return BindingResolution.dependencyUnavailable("cache read failed");
@@ -106,7 +107,7 @@ public class BindingServiceImpl implements BindingService {
                 .hsmUid(hsmUid)
                 .bindingVersion(bindingVersion == null ? 0L : bindingVersion)
                 .bindingUpdatedAt(Instant.now())
-                .source(BindingSource.ADMISSION)
+                .source(BindingSource.VIAM_ADMISSION)
                 .build();
         writeBidirectional(binding);
         log.info("Admission binding remembered: vin={}, hsmUid={}", LogMask.mask(vin), LogMask.mask(hsmUid));
@@ -168,9 +169,9 @@ public class BindingServiceImpl implements BindingService {
     // 内部实现
     // ------------------------------------------------------------------
 
-    private BindingResolution mapTspResult(TspResolveResult r) {
-        if (r == null || r.getStatus() != TspResolveResult.Status.RESOLVED) {
-            String reason = r == null ? "null TSP result" : r.getReason();
+    private BindingResolution mapViamResult(ViamResolveResult r) {
+        if (r == null || r.getStatus() != ViamResolveResult.Status.RESOLVED) {
+            String reason = r == null ? "null VIAM result" : r.getReason();
             return switch (reason == null ? "" : reason) {
                 case "BINDING_CONFLICT" -> BindingResolution.conflict();
                 case "DEPENDENCY_UNAVAILABLE", "INVALID_ARGUMENT" ->
@@ -185,7 +186,7 @@ public class BindingServiceImpl implements BindingService {
                 .tboxSn(r.getTboxSn())
                 .bindingVersion(r.getBindingVersion() == null ? 0L : r.getBindingVersion())
                 .bindingUpdatedAt(r.getBindingUpdatedAt() == null ? Instant.now() : r.getBindingUpdatedAt())
-                .source(BindingSource.TSP)
+                .source(BindingSource.VIAM_RESOLVE)
                 .build();
         writeBidirectional(binding);
         return BindingResolution.resolved(binding);
@@ -206,7 +207,7 @@ public class BindingServiceImpl implements BindingService {
 
     /**
      * 双向 key 在同一原子操作（MULTI/EXEC）中写入，携带 bindingVersion/时间/来源与有界 TTL。
-     * 写失败只影响加速，不得伪造未绑定（TSP 仍是权威）。
+     * 写失败只影响加速，不得伪造未绑定（VIAM 仍是权威）。
      */
     private void writeBidirectional(VehicleAccessBinding binding) {
         try {

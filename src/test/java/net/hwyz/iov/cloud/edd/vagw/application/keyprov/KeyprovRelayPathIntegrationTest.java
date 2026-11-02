@@ -46,7 +46,7 @@ import static org.mockito.Mockito.*;
  * keyprov relay 全链路集成测试（EDD-VAGW-DSN-CR-011 §4.4 时序，由 EDD-VAGW-DSN-CR-016 增量修订）。
  * <p>
  * 串联真实组件：ingress 适配器 → 认证上下文解析器 → 协议校验器 → bulkhead → 专属执行器 →
- * relay 编排 → Envelope 工厂 → 下行发布；仅 mock 会话注册表、VMD Gateway 与 MQTT 发布器的底层通道。
+ * relay 编排 → Envelope 工厂 → 下行发布；仅 mock 会话注册表、VIAM Gateway 与 MQTT 发布器的底层通道。
  * 覆盖 Request→Response 端到端、canonical Envelope 关联、能力关闭隔离。
  * </p>
  */
@@ -59,7 +59,7 @@ class KeyprovRelayPathIntegrationTest {
     @Mock
     private SessionService sessionService;
     @Mock
-    private VmdKeyProvisioningGateway vmdGateway;
+    private ViamKeyProvisioningGateway viamGateway;
     @Mock
     private KeyprovMqttDownlinkPublisher downlinkPublisher;
 
@@ -73,7 +73,7 @@ class KeyprovRelayPathIntegrationTest {
         properties.setEnabled(true);
         properties.setMaxInFlight(4);
         properties.setQueueCapacity(0);
-        properties.getVmd().setDeadline(Duration.ofSeconds(2));
+        properties.getViam().setDeadline(Duration.ofSeconds(2));
 
         KeyprovContractGuard guard = new KeyprovContractGuard();
         guard.verify();
@@ -85,7 +85,7 @@ class KeyprovRelayPathIntegrationTest {
         KeyprovInbox inbox = new KeyprovInbox(properties);
         KeyprovEnvelopeFactory envelopeFactory = new KeyprovEnvelopeFactory(properties);
         KeyprovRelayAppService relay = new KeyprovRelayAppService(properties, guard, validator, inbox,
-                vmdGateway, envelopeFactory, downlinkPublisher, sessionService, metrics);
+                viamGateway, envelopeFactory, downlinkPublisher, sessionService, metrics);
         KeyprovAdmissionBulkhead bulkhead = new KeyprovAdmissionBulkhead(properties, metrics);
         executor = new KeyprovExecutor(properties, metrics);
         adapter = new KeyprovMqttIngressAdapter(properties, validator, resolver, bulkhead, executor, relay,
@@ -99,7 +99,7 @@ class KeyprovRelayPathIntegrationTest {
         }
     }
 
-    /** 等待专属执行器完成已提交任务（ingress 已改为异步提交，MQTT 回调不等待 VMD）。 */
+    /** 等待专属执行器完成已提交任务（ingress 已改为异步提交，MQTT 回调不等待 VIAM）。 */
     private void awaitExecutorIdle(long baselineCompleted) throws InterruptedException {
         long deadline = System.currentTimeMillis() + 5000L;
         while (System.currentTimeMillis() < deadline) {
@@ -112,13 +112,13 @@ class KeyprovRelayPathIntegrationTest {
     }
 
     @Test
-    @DisplayName("线程隔离：VMD 调用运行在 keyprov-vmd-* 专属线程，不在 MQTT/调用方线程")
-    void vmdCall_shouldRunOnDedicatedKeyprovThread() throws Exception {
+    @DisplayName("线程隔离：VIAM 调用运行在 keyprov-viam-* 专属线程，不在 MQTT/调用方线程")
+    void viamCall_shouldRunOnDedicatedKeyprovThread() throws Exception {
         when(sessionService.getSessionByDeviceSn("DEVICE001")).thenReturn(Optional.of(onlineSession()));
         AtomicReference<String> callThread = new AtomicReference<>();
-        when(vmdGateway.relay(any())).thenAnswer(invocation -> {
+        when(viamGateway.relay(any())).thenAnswer(invocation -> {
             callThread.set(Thread.currentThread().getName());
-            return VmdRelayResult.unavailable(KeyprovReason.KEYPROV_VMD_UNAVAILABLE);
+            return ViamRelayResult.unavailable(KeyprovReason.KEYPROV_VIAM_UNAVAILABLE);
         });
 
         long baseline = executor.completedTaskCount();
@@ -126,8 +126,8 @@ class KeyprovRelayPathIntegrationTest {
         awaitExecutorIdle(baseline);
 
         assertNotNull(callThread.get());
-        assertTrue(callThread.get().startsWith("keyprov-vmd-"),
-                "VMD 调用必须在专属线程，实际: " + callThread.get());
+        assertTrue(callThread.get().startsWith("keyprov-viam-"),
+                "VIAM 调用必须在专属线程，实际: " + callThread.get());
         assertNotEquals(Thread.currentThread().getName(), callThread.get());
     }
 
@@ -203,7 +203,7 @@ class KeyprovRelayPathIntegrationTest {
     }
 
     @Test
-    @DisplayName("Request→Response：认证上下文校验通过后转发 VMD 并发布 canonical down/keyprov")
+    @DisplayName("Request→Response：认证上下文校验通过后转发 VIAM 并发布 canonical down/keyprov")
     void requestToResponse_endToEnd() throws Exception {
         when(sessionService.getSessionByDeviceSn("DEVICE001")).thenReturn(Optional.of(onlineSession()));
         when(sessionService.isGenerationCurrent("DEVICE001", 2L)).thenReturn(true);
@@ -218,7 +218,7 @@ class KeyprovRelayPathIntegrationTest {
                 .setExpireAtMs(1900000000000L)
                 .build().toByteArray();
         byte[] expectedResponse = canonicalResponse.clone();
-        when(vmdGateway.relay(any())).thenReturn(new VmdRelayResult("req-001", RESP_TYPE,
+        when(viamGateway.relay(any())).thenReturn(new ViamRelayResult("req-001", RESP_TYPE,
                 canonicalResponse, 1900000000000L, KeyprovOutcome.SUCCESS, null, false));
 
         ArgumentCaptor<byte[]> published = ArgumentCaptor.forClass(byte[].class);
@@ -229,7 +229,7 @@ class KeyprovRelayPathIntegrationTest {
         adapter.handleUplink("vehicle/DEVICE001/up/keyprov", uplinkEnvelope());
         awaitExecutorIdle(baseline);
 
-        verify(vmdGateway).relay(any());
+        verify(viamGateway).relay(any());
         verify(downlinkPublisher).publish(eq("DEVICE001"), any(byte[].class));
 
         Envelope.VehicleMessageEnvelope down = Envelope.VehicleMessageEnvelope.parseFrom(published.getValue());
@@ -243,11 +243,11 @@ class KeyprovRelayPathIntegrationTest {
         assertEquals(1900000000000L, down.getExpireAtMs());
         assertNotEquals("up-msg-001", down.getMessageId(), "下行必须生成新 messageId");
         assertArrayEquals(expectedResponse, down.getPayload().toByteArray(),
-                "VAGW 必须原样透传 VMD canonical payload");
+                "VAGW 必须原样透传 VIAM canonical payload");
     }
 
     @Test
-    @DisplayName("能力关闭：keyprov 上行不调用 VMD（与 FOTA/远控隔离）")
+    @DisplayName("能力关闭：keyprov 上行不调用 VIAM（与 FOTA/远控隔离）")
     void disabled_isolation() throws Exception {
         properties.setEnabled(false);
 
@@ -255,14 +255,14 @@ class KeyprovRelayPathIntegrationTest {
         adapter.handleUplink("vehicle/DEVICE001/up/keyprov", uplinkEnvelope());
         Thread.sleep(100L);
 
-        verifyNoInteractions(vmdGateway);
+        verifyNoInteractions(viamGateway);
         verifyNoInteractions(downlinkPublisher);
         assertEquals(baseline, executor.completedTaskCount(), "disabled 时不应提交执行任务");
     }
 
     @Test
-    @DisplayName("身份不一致：Topic/会话与 Envelope.device_id 不一致时 VMD 调用次数为 0")
-    void identityMismatch_noVmdCall() throws Exception {
+    @DisplayName("身份不一致：Topic/会话与 Envelope.device_id 不一致时 VIAM 调用次数为 0")
+    void identityMismatch_noViamCall() throws Exception {
         when(sessionService.getSessionByDeviceSn("DEVICE001")).thenReturn(Optional.of(onlineSession()));
 
         byte[] forged = Envelope.VehicleMessageEnvelope.newBuilder()
@@ -276,12 +276,12 @@ class KeyprovRelayPathIntegrationTest {
         adapter.handleUplink("vehicle/DEVICE001/up/keyprov", forged);
         Thread.sleep(100L);
 
-        verifyNoInteractions(vmdGateway);
+        verifyNoInteractions(viamGateway);
         verifyNoInteractions(downlinkPublisher);
     }
 
     @Test
-    @DisplayName("ACK→AckResult：CR-008 proof bytes 经 MQTT→VAGW→VMD 逐字节一致")
+    @DisplayName("ACK→AckResult：CR-008 proof bytes 经 MQTT→VAGW→VIAM 逐字节一致")
     void ackImportAttestation_endToEnd_shouldRelayCanonicalBytesVerbatim() throws Exception {
         when(sessionService.getSessionByDeviceSn("DEVICE001")).thenReturn(Optional.of(onlineSession()));
         when(sessionService.isGenerationCurrent("DEVICE001", 2L)).thenReturn(true);
@@ -294,11 +294,11 @@ class KeyprovRelayPathIntegrationTest {
         byte[] expectedAckResult = canonicalAckResult.clone();
         java.util.concurrent.atomic.AtomicReference<byte[]> forwardedPayload =
                 new java.util.concurrent.atomic.AtomicReference<>();
-        when(vmdGateway.relay(any())).thenAnswer(invocation -> {
-            VmdKeyProvisioningCommand command = invocation.getArgument(0);
+        when(viamGateway.relay(any())).thenAnswer(invocation -> {
+            ViamKeyProvisioningCommand command = invocation.getArgument(0);
             // 敏感 payload 在 relay finally 会被清零；在调用点复制以验证逐字节一致
             forwardedPayload.set(command.canonicalPayload().clone());
-            return new VmdRelayResult("req-001",
+            return new ViamRelayResult("req-001",
                     "security.keyprov.v1.KeyProvisioningAckResult", canonicalAckResult, null,
                     KeyprovOutcome.SUCCESS, null, false);
         });
@@ -314,7 +314,7 @@ class KeyprovRelayPathIntegrationTest {
         awaitExecutorIdle(baseline);
 
         assertArrayEquals(originalPayload, forwardedPayload.get(),
-                "VAGW 不得重序列化/改写 ACK proof 字段，必须逐字节提交 VMD");
+                "VAGW 不得重序列化/改写 ACK proof 字段，必须逐字节提交 VIAM");
         assertArrayEquals(originalPayload, Envelope.VehicleMessageEnvelope.parseFrom(uplink)
                         .getPayload().toByteArray(),
                 "VAGW 校验后不得修改原 MQTT payload");
@@ -322,7 +322,7 @@ class KeyprovRelayPathIntegrationTest {
         Envelope.VehicleMessageEnvelope down = Envelope.VehicleMessageEnvelope.parseFrom(
                 published.getValue());
         assertArrayEquals(expectedAckResult, down.getPayload().toByteArray(),
-                "VMD AckResult canonical bytes 必须原样下发");
+                "VIAM AckResult canonical bytes 必须原样下发");
         assertEquals("security.keyprov.v1.KeyProvisioningAckResult", down.getPayloadType());
     }
 }

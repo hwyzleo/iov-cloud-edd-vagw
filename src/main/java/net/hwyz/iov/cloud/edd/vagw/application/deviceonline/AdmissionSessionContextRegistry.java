@@ -17,10 +17,10 @@ import java.util.concurrent.TimeUnit;
 /**
  * 准入会话快照注册表（EDD-VAGW-DSN-CR-012 §3.1/§3.4）。
  * <p>
- * {@code /mqtt/auth} 获得 TSP ALLOW 后保存候选态不可变快照，并原子递增 connection generation
+ * {@code /mqtt/auth} 获得 VIAM ALLOW 后保存候选态不可变快照，并原子递增 connection generation
  * （Redis INCR，跨实例单调）。{@code client.connected} 仅允许关联本快照；候选态在提升为 active
  * 后删除，不跨重连复用。generation 在 auth 期分配、connected 期提升为 active，保证 Hook 重试
- * 与 Kafka 重试 eventId 稳定。
+ * 与 Kafka 重试 eventId 稳定。快照携带 admissionDecisionId/bindingVersion（FR-019-04 证据）。
  * </p>
  */
 @Slf4j
@@ -38,10 +38,14 @@ public class AdmissionSessionContextRegistry {
     /**
      * 保存准入候选快照并分配 connection generation。
      *
+     * @param admissionDecisionId VIAM 准入裁决ID（ALLOW 时必填，FR-019-04 可信证据）
+     * @param bindingVersion      VIAM 返回的绑定版本
      * @return 已固化的候选快照；持久化失败返回 {@link Optional#empty()}（调用方 fail-closed）
      */
     public Optional<AdmissionSessionContext> saveCandidate(String hsmUid, String vin, String certSerial,
-                                                           String clientId, String sourceIp, Integer protoVer) {
+                                                           String clientId, String sourceIp, Integer protoVer,
+                                                           String admissionDecisionId, Long bindingVersion,
+                                                           long securityVersion) {
         if (hsmUid == null || hsmUid.isBlank() || clientId == null || clientId.isBlank()) {
             return Optional.empty();
         }
@@ -50,7 +54,8 @@ public class AdmissionSessionContextRegistry {
             Instant now = Instant.now();
             AdmissionSessionContext context = new AdmissionSessionContext(
                     normalize(hsmUid), vin, certSerial, clientId, sourceIp, protoVer,
-                    generation, now, now.plusSeconds(properties.getAdmissionTtlSeconds()));
+                    generation, now, now.plusSeconds(properties.getAdmissionTtlSeconds()),
+                    admissionDecisionId, bindingVersion, securityVersion);
             redisTemplate.opsForValue().set(CONTEXT_KEY_PREFIX + clientId,
                     objectMapper.writeValueAsString(context),
                     properties.getAdmissionTtlSeconds(), TimeUnit.SECONDS);

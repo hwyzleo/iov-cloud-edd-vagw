@@ -36,6 +36,9 @@ public class SessionInfo implements Serializable {
     /** 认证期证书指纹（如可用，可能为 null）。 */
     private String certFingerprint;
 
+    /** 会话授权时的安全状态版本（来自 VIAM ALLOW securityVersion；供乱序失效事件判定） */
+    private Long authorizedSecurityVersion;
+
     // ---- 设备上线事件（EDD-VAGW-DSN-CR-012 §3.5）----
     /** 本连接已固化并进入 Outbox 的 DEVICE_ONLINE eventId（用于会话对账与幂等）。 */
     private String lastDeviceOnlineEventId;

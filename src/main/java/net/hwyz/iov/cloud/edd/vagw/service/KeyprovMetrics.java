@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>
  * 指标：{@code keyprov_inflight_current}、{@code keyprov_admission_total{result}}、
  * {@code keyprov_executor_active}、{@code keyprov_executor_rejected_total{reason}}、
- * {@code keyprov_vmd_calls_total{result}}、{@code keyprov_vmd_latency}、
+ * {@code keyprov_viam_calls_total{result}}、{@code keyprov_viam_latency}、
  * {@code keyprov_circuit_state}、{@code keyprov_downlink_total{result}}。
  * </p>
  */
@@ -67,14 +67,14 @@ public class KeyprovMetrics {
     }
 
     /** VMD 调用结果计数（success / rejected / unavailable / timeout / unknown / circuit_open / exception）。 */
-    public void vmdCall(String result) {
-        increment("keyprov_vmd_calls_total{result=" + result + "}");
+    public void viamCall(String result) {
+        increment("keyprov_viam_calls_total{result=" + result + "}");
     }
 
     /** VMD 调用时延（毫秒）；只累加与计数，不记录身份。 */
-    public void vmdLatency(long latencyMs) {
-        increment("keyprov_vmd_latency_count");
-        counters.computeIfAbsent("keyprov_vmd_latency_sum", key -> new AtomicLong())
+    public void viamLatency(long latencyMs) {
+        increment("keyprov_viam_latency_count");
+        counters.computeIfAbsent("keyprov_viam_latency_sum", key -> new AtomicLong())
                 .addAndGet(Math.max(0L, latencyMs));
     }
 

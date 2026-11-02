@@ -77,7 +77,7 @@ class MqttConnectionEventHandlerTest {
 
     private AdmissionSessionContext context(Instant expiresAt) {
         return new AdmissionSessionContext("DEVICE-1", "VIN1", "CERT", "client1",
-                "10.0.0.1", 5, 12L, Instant.now(), expiresAt);
+                "10.0.0.1", 5, 12L, Instant.now(), expiresAt, "ADM-test", 1L, 0L);
     }
 
     @Test
@@ -91,7 +91,7 @@ class MqttConnectionEventHandlerTest {
 
         assertEquals(DeviceOnlineHookResult.ENQUEUED, handler.handleConnected(request()));
 
-        verify(sessionService).onConnected(eq("DEVICE-1"), eq("client1"), any(), any(), eq(12L), anyString());
+        verify(sessionService).onConnected(eq("DEVICE-1"), eq("client1"), any(), any(), eq(12L), anyString(), eq(0L));
         verify(kicker, never()).kick(any(), any());
     }
 
@@ -117,7 +117,7 @@ class MqttConnectionEventHandlerTest {
         verify(sessionService).onDisconnected("DEVICE-1");
         verify(outboxStore).removeOnline("DEVICE-1");
         verify(kicker).kick("client1", "NO_ADMISSION_CONTEXT");
-        verify(sessionService, never()).onConnected(any(), any(), any(), any(), any(), any());
+        verify(sessionService, never()).onConnected(any(), any(), any(), any(), any(), any(), anyLong());
         verify(outboxStore, never()).enqueue(any(), any(), any());
     }
 
@@ -152,7 +152,7 @@ class MqttConnectionEventHandlerTest {
                 .thenReturn(Optional.of(context(Instant.now().plusSeconds(300))));
         when(sessionService.getSessionByDeviceSn("DEVICE-1")).thenReturn(Optional.empty());
         doThrow(new RuntimeException("redis down")).when(sessionService)
-                .onConnected(any(), any(), any(), any(), any(), any());
+                .onConnected(any(), any(), any(), any(), any(), any(), anyLong());
 
         assertEquals(DeviceOnlineHookResult.PERSIST_FAILED, handler.handleConnected(request()));
 

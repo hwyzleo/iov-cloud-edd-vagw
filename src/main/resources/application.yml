@@ -15,39 +15,24 @@ spring:
       # FOTA 下行 ConsumerRecord<String, byte[]>
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
-  # OpenFeign（Spring Cloud 2022/OpenFeign 4.0）：官方 edd-vmd-api Keyprov Service 专属超时。
-  # EDD-VAGW-DSN-CR-016 §2.4：统一 absolute deadline；不实现 per-client 连接池，
-  # 并发连接上限由 Keyprov bulkhead max-in-flight 约束；loggerLevel 固定 basic，
-  # 禁止 body/FULL 日志，避免 canonical payload 进入日志。
+  # OpenFeign（Spring Cloud 2022/OpenFeign 4.0）：官方 VIAM/Keyprov 服务专属超时。
+  # EDD-VAGW-DSN-CR-016 §2.4 + EDD-VAGW-DSN-CR-019 §7.1：
+  #   viamDeviceAdmissionService —— 准入预算 connect 250ms / read 1500ms（读超时不重试）；
+  #   viamKeyProvisioningService —— Keyprov 专属 absolute deadline 治理；
+  # 不实现 per-client 连接池，并发连接上限由 Keyprov bulkhead max-in-flight 约束；
+  # loggerLevel 固定 basic，禁止 body/FULL 日志，避免 canonical payload 进入日志。
   cloud:
     openfeign:
       client:
         config:
-          vmdKeyProvisioningService:
+          viamDeviceAdmissionService:
+            connectTimeout: 250
+            readTimeout: 1500
+            loggerLevel: basic
+          viamKeyProvisioningService:
             connectTimeout: 500
             readTimeout: 2000
             loggerLevel: basic
-
-# FOTA 透明桥接配置（EDD-VAGW-DSN-CR-006 §5/§10 + EDD-VAGW-DSN-CR-008）
-# VAGW 作为 Producer 的 4 个 Topic：vagw.fota / vagw.fota.delivery / vagw.fota.dlq.up / vagw.fota.dlq.down
-# （名称见 VagwFotaTopicProperties，生产环境经 Nacos 覆盖）；FOTA 下行业务 Topic iov.vagw.down.fota
-# 由 IOV-OTA 生产、VAGW 消费，消费组 edd-vagw-fota-downlink；
-# 协议 major 与 manifest 不一致时启动 fail-closed（ProtocolContractGuard）。
-iov:
-  # 组织自有 JSON java.time 时间契约（EDD-VAGW-DSN-CR-018 §5.2.3 / FW-WEB-DSN-CR-001 RD-001-1~5）：
-  # 兼容阶段显式固定 epoch-millis 写出：受管 java.time 字段（VAGW 当前全部为 Instant 绝对时刻）
-  # 输出 13 位 epoch 毫秒；读入由 FW-WEB IovJavaTimeReadModule 提供 ISO / 10 位秒 / 13 位毫秒双读。
-  # 配置仅启动生效，禁止经 Nacos 全局共享配置热翻转 mapper；未知 date-format 值启动失败。
-  # zone-id 为框架要求的显式业务 ZoneId：VAGW 当前无 LocalDateTime/OffsetDateTime JSON 字段，
-  # 该值不参与 Instant 字段的 epoch/ISO 转换，但仍是潜在 LDT/ODT 数字转换路径的实际策略，
-  # 新增此类字段时须重新核验时间语义，不得直接沿用（EDD-VAGW-DSN-CR-018 §5.2.3）。
-  web:
-    jackson:
-      date-format: epoch-millis
-      zone-id: Asia/Shanghai
-  kafka:
-    topic-provisioning:
-      enabled: true    # FW-KAFKA：启动时检查并幂等创建 VAGW 生产的 4 个 FOTA Topic（CR-008 §3）
 
 vagw:
   kafka:
@@ -106,8 +91,8 @@ vagw:
     max-payload-bytes: 262016
     uplink-produce-retries: 3
     uplink-produce-retry-delay-ms: 500
-  # 设备准入（EDD-VAGW-DSN-CR-013 §7）
-  # 超时预算基线：framework PKI total-timeout=1s ≤ VAGW→TSP read-timeout(1.5s)-250ms
+  # 设备准入（EDD-VAGW-DSN-CR-013 §7，owner 由 EDD-VAGW-DSN-CR-019 切换 VIAM）
+  # 超时预算基线：framework PKI total-timeout=1s ≤ VAGW→VIAM read-timeout(1.5s)-250ms
   # ≤ EMQX→VAGW HTTP auth timeout(≥2s)-500ms；读超时代表结果未知，不做第二次 /decide。
   admission:
     peer-certificate:
@@ -116,17 +101,37 @@ vagw:
       # 入站证书编码能力声明（EDD-VAGW-DSN-CR-014 §8）：启动校验必须恰好为 [PEM, BASE64_DER]，
       # 缺失/未知/重复即启动失败；不作为灰度或降级开关，运行时始终同时启用两种解析能力，不支持动态刷新。
       accepted-encodings: [PEM, BASE64_DER]
-    tsp:
+    viam:
       path: /api/service/deviceAdmission/v1/decide
       connect-timeout: 250ms
       read-timeout: 1500ms
       retry-on-read-timeout: false
     emqx-auth:
       required-timeout: 2s  # EMQX → VAGW HTTP authn 回调预算（部署前置）
-  # 绑定解析配置（EDD-VAGW-DSN-CR-007 §8）：缓存有界 TTL，未命中回源 TSP；
-  # 不做长期负缓存（negative-cache-ttl 恒为 0）
+  # 绑定解析配置（EDD-VAGW-DSN-CR-007 §8，owner 由 EDD-VAGW-DSN-CR-019 切换 VIAM）：
+  # 缓存有界 TTL，未命中回源 VIAM；不做长期负缓存（negative-cache-ttl 恒为 0）
   binding:
     cache-ttl-seconds: 300
+  # VAGW → VIAM 服务间签名认证（SEC-VIAM-DSN-CR-001 / G-4，EDD-VAGW-DSN-CR-019 配套）：
+  # VIAM /api/service/** 强制 HMAC-SHA256 验签（fail-closed）；Secret 经环境变量注入（Base64，
+  # 禁止 Nacos/日志）；keyId 与 VIAM secrets.<clientId>.<keyId> 对应；audience 固定 sec-viam。
+  security:
+    viam-service-identity:
+      enabled: ${VAGW_VIAM_SERVICE_IDENTITY_ENABLED:true}
+      client-id: ${VAGW_VIAM_SERVICE_CLIENT_ID:VAGW}
+      key-id: ${VAGW_VIAM_SERVICE_KEY_ID:k1}
+      secret: ${VAGW_VIAM_SERVICE_SECRET:}
+      audience: ${VAGW_VIAM_SERVICE_AUDIENCE:sec-viam}
+  # 访问失效消费（SEC-VIAM-DSN-CR-001 / FR-VIAM-008 / G-3，EDD-VAGW-DSN-CR-019 配套）：
+  # 消费 viam.access-invalidated（VIAM 生产，VAGW 消费）；按安全版本/generation 判定执行失效/断连，
+  # 并以 ViamAccessInvalidationService.receipt() 回执区分状态。
+  access-invalidation:
+    topic: ${VAGW_ACCESS_INVALIDATION_TOPIC:viam.access-invalidated}
+    group-id: ${VAGW_ACCESS_INVALIDATION_GROUP:edd-vagw-access-invalidation}
+    dedup-ttl: 24h
+    version-ttl: 7d
+    receipt-retry-attempts: 3
+    receipt-retry-backoff: 200ms
   # keyprov 能力与门禁（EDD-VAGW-DSN-CR-011，由 EDD-VAGW-DSN-CR-016 增量修订）：量产默认启用。
   # 显式关闭时不注册 Keyprov ACL／上行 filter／executor／Gateway 调用链，且不影响 FOTA/远控等
   # 其他 service。enabled=true 时必须存在 edd-vmd-api 官方 VmdKeyProvisioningService
@@ -145,8 +150,8 @@ vagw:
     worker-count: ${VAGW_KEYPROV_WORKER_COUNT:0}       # 0 = 跟随 max-in-flight
     queue-capacity: ${VAGW_KEYPROV_QUEUE_CAPACITY:0}   # 默认零等待（SynchronousQueue）
     queue-wait: ${VAGW_KEYPROV_QUEUE_WAIT:0ms}         # 默认不等待，许可耗尽立即拒绝
-    vmd:
-      deadline: ${VAGW_KEYPROV_VMD_DEADLINE:2s}
+    viam:
+      deadline: ${VAGW_KEYPROV_VIAM_DEADLINE:2s}
     circuit-breaker:
       enabled: true
       failure-window: ${VAGW_KEYPROV_CB_FAILURE_WINDOW:30s}
@@ -175,19 +180,12 @@ vagw:
   # 配置校验：enabled=true 时，peer-host-cidrs 非空且服务凭据模式完整（证书 CN，或账号+口令成对），
   # 否则启动 fail-fast。
 
-# TSP Device Admission Service configuration
-tsp:
-  device-admission:
-    url: http://tsp-service:8080
-
+# Feign 客户端配置（EDD-VAGW-DSN-CR-019）：viamVehicleAccessIdentityService 由阶段 2 迁移，
+# 删除前保持旧 contextId 仅用于过渡；正式切换后由 openfeign.client.config 统一承载。
 feign:
   client:
     config:
-      tsp-device-admission:
-        connectTimeout: 250
-        readTimeout: 1500
-        loggerLevel: basic   # 禁止 body/FULL 日志，避免 PEM/DER 进入日志
-      tsp-vehicle-access-identity:
+      viamVehicleAccessIdentityService:
         connectTimeout: 500
         readTimeout: 500
         loggerLevel: basic

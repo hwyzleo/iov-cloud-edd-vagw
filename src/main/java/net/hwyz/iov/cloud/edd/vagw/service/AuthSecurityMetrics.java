@@ -19,8 +19,8 @@ import java.util.concurrent.atomic.AtomicLong;
 public class AuthSecurityMetrics {
 
     private final Map<String, AtomicLong> counters = new ConcurrentHashMap<>();
-    private final AtomicLong tspAdmissionLatencyCount = new AtomicLong();
-    private final AtomicLong tspAdmissionLatencySumMs = new AtomicLong();
+    private final AtomicLong viamAdmissionLatencyCount = new AtomicLong();
+    private final AtomicLong viamAdmissionLatencySumMs = new AtomicLong();
 
     private void increment(String name) {
         counters.computeIfAbsent(name, key -> new AtomicLong()).incrementAndGet();
@@ -69,21 +69,21 @@ public class AuthSecurityMetrics {
         log.warn("SEC-AUTH | peer certificate validation failed, outcome={}", outcome);
     }
 
-    /** TSP 准入裁决结果（decision/reason 均为语义枚举名，不含身份标识） */
-    public void incTspAdmission(String decision, String reason) {
-        increment("mqtt_tsp_admission_total{decision=" + decision + ",reason=" + reason + "}");
+    /** VIAM 准入裁决结果（decision/reason 均为语义枚举名，不含身份标识，EDD-VAGW-DSN-CR-019 §8） */
+    public void incViamAdmission(String decision, String reason) {
+        increment("vagw_viam_admission_total{decision=" + decision + ",reason=" + reason + "}");
     }
 
-    /** TSP 准入裁决调用耗时（毫秒），用于对齐 read-timeout 预算 */
-    public void recordTspAdmissionLatency(long millis) {
-        tspAdmissionLatencyCount.incrementAndGet();
-        tspAdmissionLatencySumMs.addAndGet(Math.max(millis, 0L));
+    /** VIAM 准入裁决调用耗时（毫秒），用于对齐 read-timeout 预算 */
+    public void recordViamAdmissionLatency(long millis) {
+        viamAdmissionLatencyCount.incrementAndGet();
+        viamAdmissionLatencySumMs.addAndGet(Math.max(millis, 0L));
     }
 
-    /** 平均 TSP 准入裁决耗时（毫秒）；无样本时为 0 */
-    public double getTspAdmissionLatencyAvgMs() {
-        long count = tspAdmissionLatencyCount.get();
-        return count == 0 ? 0d : (double) tspAdmissionLatencySumMs.get() / count;
+    /** 平均 VIAM 准入裁决耗时（毫秒）；无样本时为 0 */
+    public double getViamAdmissionLatencyAvgMs() {
+        long count = viamAdmissionLatencyCount.get();
+        return count == 0 ? 0d : (double) viamAdmissionLatencySumMs.get() / count;
     }
 
     public long get(String name) {

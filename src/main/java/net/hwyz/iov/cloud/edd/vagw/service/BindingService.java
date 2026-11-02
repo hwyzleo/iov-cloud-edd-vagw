@@ -7,7 +7,7 @@ import java.util.Optional;
 /**
  * 设备绑定解析服务（EDD-VAGW-DSN-CR-007 §4）。
  * <p>
- * 负责 VIN ↔ hsmUid（南向接入身份）双向解析：下行按 VIN 走版本化缓存 + TSP 回源；
+ * 负责 VIN ↔ hsmUid（南向接入身份）双向解析：下行按 VIN 走版本化缓存 + VIAM 回源；
  * 上行优先使用准入成功时写入的会话绑定；绑定缓存由 VAGW 自主建立，不依赖外部预热。
  * </p>
  */
@@ -18,7 +18,7 @@ public interface BindingService {
     // ------------------------------------------------------------------
 
     /**
-     * 按 VIN 解析当前接入绑定（权威：版本化缓存命中 → TSP 回源）。
+     * 按 VIN 解析当前接入绑定（权威：版本化缓存命中 → VIAM 回源）。
      *
      * @param vin 车辆 VIN
      * @return 结构化解析结果，区分 UNBOUND / CONFLICT / DEPENDENCY_UNAVAILABLE
@@ -60,7 +60,7 @@ public interface BindingService {
     Optional<String> resolveVin(String hsmUid);
 
     /**
-     * @deprecated 使用 {@link #resolveByVin(String)}（缓存未命中回源 TSP，不再固定返回空）
+     * @deprecated 使用 {@link #resolveByVin(String)}（缓存未命中回源 VIAM，不再固定返回空）
      */
     @Deprecated
     Optional<String> resolveDeviceSn(String vin);

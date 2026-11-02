@@ -519,10 +519,10 @@ class KeyprovProtocolValidatorTest {
 
     @Test
     void statusRequest_whenProtocolApiIncompatible_shouldReject() {
-        when(guard.readiness()).thenReturn(notReady(KeyprovReason.KEYPROV_VMD_API_INCOMPATIBLE, false));
+        when(guard.readiness()).thenReturn(notReady(KeyprovReason.KEYPROV_VIAM_API_INCOMPATIBLE, false));
         KeyProvisioningStatusRequest status = KeyProvisioningStatusRequest.newBuilder()
                 .setRequestId("req-001").build();
-        assertEquals(KeyprovReason.KEYPROV_VMD_API_INCOMPATIBLE,
+        assertEquals(KeyprovReason.KEYPROV_VIAM_API_INCOMPATIBLE,
                 validator.validateUplink(statusEnvelope(status), null, context()).reason());
     }
 

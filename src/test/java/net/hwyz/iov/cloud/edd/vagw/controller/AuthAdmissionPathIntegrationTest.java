@@ -13,14 +13,14 @@ import net.hwyz.iov.cloud.edd.vagw.service.AuthSecurityMetrics;
 import net.hwyz.iov.cloud.edd.vagw.service.AuthenticatedIdentityStore;
 import net.hwyz.iov.cloud.edd.vagw.service.BindingService;
 import net.hwyz.iov.cloud.edd.vagw.service.SuperuserBypassGuard;
-import net.hwyz.iov.cloud.iov.tsp.api.service.TspDeviceAdmissionService;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionCheckVo;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionResultVo;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.AdmissionDecision;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.AdmissionReason;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.BindStatus;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.CertificateStatus;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.DeviceStatus;
+import net.hwyz.iov.cloud.sec.viam.api.service.ViamDeviceAdmissionService;
+import net.hwyz.iov.cloud.sec.viam.api.vo.DeviceAdmissionCheckVo;
+import net.hwyz.iov.cloud.sec.viam.api.vo.DeviceAdmissionResultVo;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.AdmissionDecision;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.AdmissionReason;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.BindStatus;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.CertificateStatus;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.DeviceStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
@@ -45,8 +45,8 @@ import static org.mockito.Mockito.*;
  * 设备准入全链路集成测试（EDD-VAGW-DSN-CR-013 §8）。
  * <p>
  * 真实装配 {@link MqttAuthController} + {@link AuthAclServiceImpl} + {@link PeerCertificateContextFactory}
- * + {@link AuthSecurityMetrics}，仅以 fake/stub 替代 TSP 准入、绑定与会话快照；
- * 覆盖 PEM → DER/serial/fingerprint → TSP decide → ALLOW/DENY 映射与敏感数据不泄漏。
+ * + {@link AuthSecurityMetrics}，仅以 fake/stub 替代 VIAM 准入、绑定与会话快照；
+ * 覆盖 PEM → DER/serial/fingerprint → VIAM decide → ALLOW/DENY 映射与敏感数据不泄漏。
  * </p>
  */
 class AuthAdmissionPathIntegrationTest {
@@ -56,7 +56,7 @@ class AuthAdmissionPathIntegrationTest {
     private static final String SOURCE_IP = "10.0.0.8";
     private static final String EXPECTED_SERIAL = "35c7a12acb912925e2ef0a4a1f1666086c4633e8";
 
-    private FakeTspDeviceAdmissionService tsp;
+    private FakeViamDeviceAdmissionService viam;
     private BindingService bindingService;
     private AuthenticatedIdentityStore identityStore;
     private AdmissionSessionContextRegistry admissionContextRegistry;
@@ -66,7 +66,7 @@ class AuthAdmissionPathIntegrationTest {
 
     @BeforeEach
     void setUp() {
-        tsp = new FakeTspDeviceAdmissionService();
+        viam = new FakeViamDeviceAdmissionService();
         bindingService = mock(BindingService.class);
         identityStore = mock(AuthenticatedIdentityStore.class);
         admissionContextRegistry = mock(AdmissionSessionContextRegistry.class);
@@ -74,13 +74,14 @@ class AuthAdmissionPathIntegrationTest {
 
         VagwAdmissionProperties properties = new VagwAdmissionProperties();
         PeerCertificateContextFactory factory = new PeerCertificateContextFactory(properties);
-        AuthAclServiceImpl service = new AuthAclServiceImpl(tsp, bindingService,
+        AuthAclServiceImpl service = new AuthAclServiceImpl(viam, bindingService,
                 mock(KeyprovProperties.class), mock(KeyprovContractGuard.class), factory, properties, metrics);
         SuperuserBypassGuard bypassGuard = mock(SuperuserBypassGuard.class);
         when(bypassGuard.isBypassAllowed(any())).thenReturn(false);
-        when(admissionContextRegistry.saveCandidate(any(), any(), any(), any(), any(), any()))
+        when(admissionContextRegistry.saveCandidate(any(), any(), any(), any(), any(), any(), any(), any(), anyLong()))
                 .thenReturn(Optional.of(new AdmissionSessionContext(DEVICE, "VIN001", EXPECTED_SERIAL,
-                        CLIENT_ID, SOURCE_IP, 4, 1L, Instant.now(), Instant.now().plusSeconds(300))));
+                        CLIENT_ID, SOURCE_IP, 4, 1L, Instant.now(), Instant.now().plusSeconds(300),
+                        "ADM-integration", 9L, 0L)));
 
         controller = new MqttAuthController(service, bypassGuard, metrics, identityStore, admissionContextRegistry);
         validPem = resource("certs/leaf-valid.pem");
@@ -107,19 +108,20 @@ class AuthAdmissionPathIntegrationTest {
                 .deviceStatus(DeviceStatus.ACTIVATING)
                 .bindVersion(9L)
                 .updatedAt(Instant.parse("2026-10-12T00:00:00Z"))
+                .admissionDecisionId("ADM-0123456789abcdef0123456789abcdef")
                 .build();
     }
 
     @Test
     void goodCertificate_shouldAllowAndForwardExactDerSerialFingerprint() throws Exception {
-        tsp.response = allowResult();
+        viam.response = allowResult();
 
         ResponseEntity<MqttAuthResponse> response = controller.authenticate(request(validPem));
 
         assertEquals("allow", response.getBody().getResult());
         assertFalse(response.getBody().getIsSuperuser());
-        assertEquals(1, tsp.calls.size());
-        DeviceAdmissionCheckVo vo = tsp.calls.get(0);
+        assertEquals(1, viam.calls.size());
+        DeviceAdmissionCheckVo vo = viam.calls.get(0);
         assertEquals(DEVICE, vo.getUid());
         assertEquals(EXPECTED_SERIAL, vo.getCertSerial());
         assertEquals(CLIENT_ID, vo.getClientId());
@@ -128,28 +130,30 @@ class AuthAdmissionPathIntegrationTest {
 
         byte[] der = Base64.getDecoder().decode(vo.getLeafCertificateDer());
         assertEquals(vo.getCertFingerprint(), sha256Hex(der));
-        // TSP 拿到的 DER 可还原为同一张叶子证书
+        // VIAM 拿到的 DER 可还原为同一张叶子证书
         X509Certificate parsed = parseDer(der);
         assertEquals(DEVICE, cn(parsed));
         // 准入成功后才固化会话快照与身份
         verify(identityStore).save(CLIENT_ID, DEVICE, EXPECTED_SERIAL, null);
-        verify(admissionContextRegistry).saveCandidate(DEVICE, "VIN001", EXPECTED_SERIAL, CLIENT_ID, SOURCE_IP, 4);
+        verify(admissionContextRegistry).saveCandidate(DEVICE, "VIN001", EXPECTED_SERIAL, CLIENT_ID, SOURCE_IP, 4,
+                "ADM-0123456789abcdef0123456789abcdef", 9L, 0L);
         verify(bindingService).rememberAdmission(DEVICE, "VIN001", 9L);
     }
 
     @Test
     void emqxBase64DerCertificate_shouldAllowAndForwardExactDer() throws Exception {
-        tsp.response = allowResult();
+        viam.response = allowResult();
 
         ResponseEntity<MqttAuthResponse> response = controller.authenticate(request(base64Der(validPem)));
 
         assertEquals("allow", response.getBody().getResult());
-        assertEquals(1, tsp.calls.size());
-        DeviceAdmissionCheckVo vo = tsp.calls.get(0);
+        assertEquals(1, viam.calls.size());
+        DeviceAdmissionCheckVo vo = viam.calls.get(0);
         assertEquals(DEVICE, vo.getUid());
         assertEquals(EXPECTED_SERIAL, vo.getCertSerial());
         assertArrayEquals(derOf(validPem), Base64.getDecoder().decode(vo.getLeafCertificateDer()));
-        verify(admissionContextRegistry).saveCandidate(DEVICE, "VIN001", EXPECTED_SERIAL, CLIENT_ID, SOURCE_IP, 4);
+        verify(admissionContextRegistry).saveCandidate(DEVICE, "VIN001", EXPECTED_SERIAL, CLIENT_ID, SOURCE_IP, 4,
+                "ADM-0123456789abcdef0123456789abcdef", 9L, 0L);
     }
 
     @Test
@@ -159,13 +163,13 @@ class AuthAdmissionPathIntegrationTest {
         assertEquals("deny", response.getBody().getResult());
         assertTrue(response.getBody().getReason().contains("804016"));
         assertTrue(response.getBody().getReason().contains("PEM_PLACEHOLDER_LEAK"));
-        assertTrue(tsp.calls.isEmpty(), "placeholder leak must not call TSP");
+        assertTrue(viam.calls.isEmpty(), "placeholder leak must not call VIAM");
         assertEquals(1L, metrics.get("mqtt_peer_certificate_validation_total{outcome=PEM_PLACEHOLDER_LEAK}"));
     }
 
     @Test
     void revokedCertificate_shouldDeny804002() {
-        tsp.response = DeviceAdmissionResultVo.builder()
+        viam.response = DeviceAdmissionResultVo.builder()
                 .decision(AdmissionDecision.DENY)
                 .reason(AdmissionReason.CERT_REVOKED)
                 .build();
@@ -176,12 +180,12 @@ class AuthAdmissionPathIntegrationTest {
         assertTrue(response.getBody().getReason().contains("804002"));
         assertTrue(response.getBody().getReason().contains("CERT_REVOKED"));
         verifyNoInteractions(identityStore);
-        verify(admissionContextRegistry, never()).saveCandidate(any(), any(), any(), any(), any(), any());
+        verify(admissionContextRegistry, never()).saveCandidate(any(), any(), any(), any(), any(), any(), any(), any(), anyLong());
     }
 
     @Test
     void pkiDependencyUnavailable_shouldDeny804002() {
-        tsp.response = DeviceAdmissionResultVo.builder()
+        viam.response = DeviceAdmissionResultVo.builder()
                 .decision(AdmissionDecision.DENY)
                 .reason(AdmissionReason.DEPENDENCY_UNAVAILABLE)
                 .build();
@@ -194,8 +198,8 @@ class AuthAdmissionPathIntegrationTest {
     }
 
     @Test
-    void tspThrows_shouldFailClosedWithoutAllow() {
-        tsp.error = new RuntimeException("TSP timeout");
+    void viamThrows_shouldFailClosedWithoutAllow() {
+        viam.error = new RuntimeException("VIAM timeout");
 
         ResponseEntity<MqttAuthResponse> response = controller.authenticate(request(validPem));
 
@@ -211,7 +215,7 @@ class AuthAdmissionPathIntegrationTest {
         assertEquals("deny", response.getBody().getResult());
         assertTrue(response.getBody().getReason().contains("804016"));
         assertTrue(response.getBody().getReason().contains("PEM_MISSING"));
-        assertTrue(tsp.calls.isEmpty(), "invalid certificate must not call TSP");
+        assertTrue(viam.calls.isEmpty(), "invalid certificate must not call VIAM");
     }
 
     @Test
@@ -230,12 +234,12 @@ class AuthAdmissionPathIntegrationTest {
         assertEquals("deny", response.getBody().getResult());
         assertTrue(response.getBody().getReason().contains("804016"));
         assertTrue(response.getBody().getReason().contains("CN_MISMATCH"));
-        assertTrue(tsp.calls.isEmpty(), "CN mismatch must not call TSP");
+        assertTrue(viam.calls.isEmpty(), "CN mismatch must not call VIAM");
     }
 
     @Test
     void sensitiveFields_shouldNotAppearInDiagnosticsOrMetrics() {
-        tsp.response = allowResult();
+        viam.response = allowResult();
         MqttAuthRequest request = request(validPem);
         request.setPassword("super-secret-service-password");
 
@@ -298,9 +302,9 @@ class AuthAdmissionPathIntegrationTest {
     }
 
     /**
-     * 真实 TspDeviceAdmissionService 的最小实现：捕获请求并返回配置结果。
+     * 真实 ViamDeviceAdmissionService 的最小实现：捕获请求并返回配置结果。
      */
-    private static final class FakeTspDeviceAdmissionService implements TspDeviceAdmissionService {
+    private static final class FakeViamDeviceAdmissionService implements ViamDeviceAdmissionService {
         private final List<DeviceAdmissionCheckVo> calls = new ArrayList<>();
         private DeviceAdmissionResultVo response;
         private RuntimeException error;

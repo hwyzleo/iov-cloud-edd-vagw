@@ -24,7 +24,7 @@ import java.util.Map;
  * @param descriptorSetHashMatched         DescriptorSet SHA-256 与清单一致
  * @param packageServiceProtocolRegistryMatched package/service/protocol/registry 精确匹配
  * @param generatedRuntimeSelfCheckPassed  生成类字段/枚举/runtime 自检通过
- * @param vmdCr062ApiCompatible            edd-vmd-api 含 CR-062 语义
+ * @param viamApiCompatible            sec-viam-api 含协议锁版语义
  * @param keyprovAckCr008AdapterReady      ACK 字段 10/11 与长度门禁可用
  * @param canonicalPayloadPassthroughReady canonical payload 原字节直传路径可用
  * @param importProofSensitiveLoggingGuardReady 敏感材料日志/序列化门禁通过
@@ -38,7 +38,7 @@ public record KeyprovReadiness(
         boolean descriptorSetHashMatched,
         boolean packageServiceProtocolRegistryMatched,
         boolean generatedRuntimeSelfCheckPassed,
-        boolean vmdCr062ApiCompatible,
+        boolean viamApiCompatible,
         boolean keyprovAckCr008AdapterReady,
         boolean canonicalPayloadPassthroughReady,
         boolean importProofSensitiveLoggingGuardReady,
@@ -54,7 +54,7 @@ public record KeyprovReadiness(
     public boolean protocolApiCompatible() {
         return packageServiceProtocolRegistryMatched
                 && generatedRuntimeSelfCheckPassed
-                && vmdCr062ApiCompatible
+                && viamApiCompatible
                 && keyprovAckCr008AdapterReady
                 && canonicalPayloadPassthroughReady;
     }
@@ -82,7 +82,7 @@ public record KeyprovReadiness(
         conditions.put("descriptorSetHashMatched", descriptorSetHashMatched);
         conditions.put("packageServiceProtocolRegistryMatched", packageServiceProtocolRegistryMatched);
         conditions.put("generatedRuntimeSelfCheckPassed", generatedRuntimeSelfCheckPassed);
-        conditions.put("vmdCr062ApiCompatible", vmdCr062ApiCompatible);
+        conditions.put("viamApiCompatible", viamApiCompatible);
         conditions.put("keyprovAckCr008AdapterReady", keyprovAckCr008AdapterReady);
         conditions.put("canonicalPayloadPassthroughReady", canonicalPayloadPassthroughReady);
         conditions.put("importProofSensitiveLoggingGuardReady", importProofSensitiveLoggingGuardReady);

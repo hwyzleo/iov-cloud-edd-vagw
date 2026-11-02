@@ -38,7 +38,7 @@ import java.util.regex.Pattern;
  *   <li>从 X509Certificate.getSerialNumber() 读取 serial，规范化为无符号 canonical hex；</li>
  *   <li>SHA-256 fingerprint 输出小写 hex。</li>
  * </ol>
- * 任何不确定均 fail-closed（{@link PeerCertificateException}），不调用 TSP、不生成 ACL、不建立会话。
+ * 任何不确定均 fail-closed（{@link PeerCertificateException}），不调用 VIAM、不生成 ACL、不建立会话。
  * 原始 PEM/DER 与 fingerprint 仅存在于调用栈内，不进入缓存、数据库、事件或普通日志。
  * </p>
  * <p>

@@ -91,8 +91,8 @@ class KeyprovExecutorTest {
         }));
         assertTrue(done.await(5, TimeUnit.SECONDS));
         assertNotNull(threadName.get());
-        assertTrue(threadName.get().startsWith("keyprov-vmd-"),
-                "VMD 调用必须运行在专属线程，实际: " + threadName.get());
+        assertTrue(threadName.get().startsWith("keyprov-viam-"),
+                "VIAM 调用必须运行在专属线程，实际: " + threadName.get());
     }
 
     @Test

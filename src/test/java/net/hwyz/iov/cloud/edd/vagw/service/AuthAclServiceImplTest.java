@@ -5,14 +5,14 @@ import net.hwyz.iov.cloud.edd.vagw.config.VagwAdmissionProperties;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovContractGuard;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.security.PeerCertificateContextFactory;
 import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
-import net.hwyz.iov.cloud.iov.tsp.api.service.TspDeviceAdmissionService;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionCheckVo;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionResultVo;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.AdmissionDecision;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.AdmissionReason;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.BindStatus;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.CertificateStatus;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.DeviceStatus;
+import net.hwyz.iov.cloud.sec.viam.api.service.ViamDeviceAdmissionService;
+import net.hwyz.iov.cloud.sec.viam.api.vo.DeviceAdmissionCheckVo;
+import net.hwyz.iov.cloud.sec.viam.api.vo.DeviceAdmissionResultVo;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.AdmissionDecision;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.AdmissionReason;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.BindStatus;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.CertificateStatus;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.DeviceStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,14 +37,15 @@ import static org.mockito.Mockito.*;
 /**
  * AuthAclServiceImpl 单元测试（EDD-VAGW-DSN-CR-013 §8）。
  * <p>
- * 真实 {@link PeerCertificateContextFactory} + 真实 PEM 夹具，覆盖证书上下文构造与 TSP 裁决映射。
+ * 真实 {@link PeerCertificateContextFactory} + 真实 PEM 夹具，覆盖证书上下文构造与 VIAM 裁决映射
+ * （owner 由 EDD-VAGW-DSN-CR-019 切换，TSP→VIAM）。
  * </p>
  */
 @ExtendWith(MockitoExtension.class)
 class AuthAclServiceImplTest {
 
     @Mock
-    private TspDeviceAdmissionService tspDeviceAdmissionService;
+    private ViamDeviceAdmissionService viamDeviceAdmissionService;
     @Mock
     private BindingService bindingService;
     @Mock
@@ -62,7 +63,7 @@ class AuthAclServiceImplTest {
     void setUp() {
         admissionProperties = new VagwAdmissionProperties();
         PeerCertificateContextFactory factory = new PeerCertificateContextFactory(admissionProperties);
-        authAclService = new AuthAclServiceImpl(tspDeviceAdmissionService, bindingService, keyprovProperties,
+        authAclService = new AuthAclServiceImpl(viamDeviceAdmissionService, bindingService, keyprovProperties,
                 keyprovContractGuard, factory, admissionProperties, metrics);
         validPem = resource("certs/leaf-valid.pem");
     }
@@ -77,6 +78,7 @@ class AuthAclServiceImplTest {
                 .deviceStatus(DeviceStatus.ACTIVE)
                 .bindVersion(7L)
                 .updatedAt(Instant.parse("2026-10-12T00:00:00Z"))
+                .admissionDecisionId("ADM-0123456789abcdef0123456789abcdef")
                 .build();
     }
 
@@ -89,7 +91,7 @@ class AuthAclServiceImplTest {
 
     @Test
     void authenticate_allowWithCompleteFields_shouldAllowAndForwardCertificateContext() throws Exception {
-        when(tspDeviceAdmissionService.decide(any())).thenReturn(allowResult());
+        when(viamDeviceAdmissionService.decide(any())).thenReturn(allowResult());
 
         AuthAclService.AuthResult result = authAclService.authenticate(
                 "DEVICE-001", "client001", validPem, "10.0.0.8");
@@ -98,13 +100,16 @@ class AuthAclServiceImplTest {
         assertEquals("DEVICE-001", result.deviceSn());
         assertEquals("VIN001", result.vin());
         assertEquals("35c7a12acb912925e2ef0a4a1f1666086c4633e8", result.certSerial());
+        // FR-019-04：VIAM decisionId/bindingVersion 进入 AuthResult，供准入快照/上线事件引用
+        assertEquals("ADM-0123456789abcdef0123456789abcdef", result.admissionDecisionId());
+        assertEquals(7L, result.bindingVersion());
         // 方向敏感显式白名单：3 个 service × (publish+subscribe) = 6；keyprov 默认关闭不授予
         assertEquals(6, result.acl().size());
         assertTrue(result.acl().stream().noneMatch(r -> r.getTopic().contains("keyprov")));
         verify(bindingService).rememberAdmission("DEVICE-001", "VIN001", 7L);
 
         ArgumentCaptor<DeviceAdmissionCheckVo> captor = ArgumentCaptor.forClass(DeviceAdmissionCheckVo.class);
-        verify(tspDeviceAdmissionService).decide(captor.capture());
+        verify(viamDeviceAdmissionService).decide(captor.capture());
         DeviceAdmissionCheckVo vo = captor.getValue();
         assertEquals("DEVICE-001", vo.getUid());
         assertEquals("35c7a12acb912925e2ef0a4a1f1666086c4633e8", vo.getCertSerial());
@@ -122,7 +127,7 @@ class AuthAclServiceImplTest {
 
     @Test
     void authenticate_allowWithEmqxBase64Der_shouldForwardStandardBase64Der() throws Exception {
-        when(tspDeviceAdmissionService.decide(any())).thenReturn(allowResult());
+        when(viamDeviceAdmissionService.decide(any())).thenReturn(allowResult());
 
         AuthAclService.AuthResult result = authAclService.authenticate(
                 "DEVICE-001", "client001", base64Der(validPem), "10.0.0.8");
@@ -131,7 +136,7 @@ class AuthAclServiceImplTest {
         assertEquals("35c7a12acb912925e2ef0a4a1f1666086c4633e8", result.certSerial());
 
         ArgumentCaptor<DeviceAdmissionCheckVo> captor = ArgumentCaptor.forClass(DeviceAdmissionCheckVo.class);
-        verify(tspDeviceAdmissionService).decide(captor.capture());
+        verify(viamDeviceAdmissionService).decide(captor.capture());
         DeviceAdmissionCheckVo vo = captor.getValue();
         byte[] forwardedDer = Base64.getDecoder().decode(vo.getLeafCertificateDer());
         assertArrayEquals(derBytes(validPem), forwardedDer);
@@ -146,13 +151,13 @@ class AuthAclServiceImplTest {
         assertFalse(result.allowed());
         assertEquals(ErrorCode.AUTH_IDENTITY_MISMATCH, result.errorCode());
         assertEquals("PEM_PLACEHOLDER_LEAK", result.reason());
-        verifyNoInteractions(tspDeviceAdmissionService);
+        verifyNoInteractions(viamDeviceAdmissionService);
         verify(metrics).incPeerCertificateValidation("PEM_PLACEHOLDER_LEAK");
     }
 
     @Test
     void authenticate_keyprovEnabledAndCompatible_shouldGrantKeyprovAcl() {
-        when(tspDeviceAdmissionService.decide(any())).thenReturn(allowResult());
+        when(viamDeviceAdmissionService.decide(any())).thenReturn(allowResult());
         when(keyprovProperties.isEnabled()).thenReturn(true);
         when(keyprovContractGuard.statusPathAvailable()).thenReturn(true);
 
@@ -167,7 +172,7 @@ class AuthAclServiceImplTest {
 
     @Test
     void authenticate_keyprovEnabledButIncompatible_shouldNotGrantKeyprovAcl() {
-        when(tspDeviceAdmissionService.decide(any())).thenReturn(allowResult());
+        when(viamDeviceAdmissionService.decide(any())).thenReturn(allowResult());
         when(keyprovProperties.isEnabled()).thenReturn(true);
         when(keyprovContractGuard.statusPathAvailable()).thenReturn(false);
 
@@ -186,7 +191,7 @@ class AuthAclServiceImplTest {
         assertFalse(result.allowed());
         assertEquals(ErrorCode.AUTH_IDENTITY_MISMATCH, result.errorCode());
         assertEquals("PEM_MISSING", result.reason());
-        verifyNoInteractions(tspDeviceAdmissionService);
+        verifyNoInteractions(viamDeviceAdmissionService);
         verify(metrics).incPeerCertificateValidation("PEM_MISSING");
     }
 
@@ -198,7 +203,7 @@ class AuthAclServiceImplTest {
         assertFalse(result.allowed());
         assertEquals(ErrorCode.AUTH_IDENTITY_MISMATCH, result.errorCode());
         assertEquals("CN_MISMATCH", result.reason());
-        verifyNoInteractions(tspDeviceAdmissionService);
+        verifyNoInteractions(viamDeviceAdmissionService);
     }
 
     @Test
@@ -213,7 +218,7 @@ class AuthAclServiceImplTest {
                 .bindVersion(7L)
                 .updatedAt(Instant.now())
                 .build();
-        when(tspDeviceAdmissionService.decide(any())).thenReturn(incomplete);
+        when(viamDeviceAdmissionService.decide(any())).thenReturn(incomplete);
 
         AuthAclService.AuthResult result = authAclService.authenticate(
                 "DEVICE-001", "client001", validPem, "10.0.0.8");
@@ -228,7 +233,7 @@ class AuthAclServiceImplTest {
     void authenticate_allowButCertStatusUnknown_shouldDeny() {
         DeviceAdmissionResultVo incomplete = allowResult();
         incomplete.setCertStatus(CertificateStatus.UNKNOWN);
-        when(tspDeviceAdmissionService.decide(any())).thenReturn(incomplete);
+        when(viamDeviceAdmissionService.decide(any())).thenReturn(incomplete);
 
         AuthAclService.AuthResult result = authAclService.authenticate(
                 "DEVICE-001", "client001", validPem, "10.0.0.8");
@@ -238,10 +243,27 @@ class AuthAclServiceImplTest {
     }
 
     @Test
+    void authenticate_allowButMissingAdmissionDecisionId_shouldDenyAsIncompleteAllow() {
+        // FR-019-04：VIAM decide 每次调用均返回 decisionId；缺失视为响应非法（证据不完整），
+        // 禁止以无证据 ALLOW 建立候选会话（VIAM 证据门禁会拒绝/隔离）
+        DeviceAdmissionResultVo incomplete = allowResult();
+        incomplete.setAdmissionDecisionId(null);
+        when(viamDeviceAdmissionService.decide(any())).thenReturn(incomplete);
+
+        AuthAclService.AuthResult result = authAclService.authenticate(
+                "DEVICE-001", "client001", validPem, "10.0.0.8");
+
+        assertFalse(result.allowed());
+        assertEquals(ErrorCode.DEVICE_BLOCKED, result.errorCode());
+        assertTrue(result.reason().contains("INCOMPLETE_ADMISSION_ALLOW"));
+        verify(bindingService, never()).rememberAdmission(any(), any(), any());
+    }
+
+    @Test
     void authenticate_uidUnknownOrUnboundOrConflict_shouldMapToDeviceUnknown() {
         for (AdmissionReason reason : new AdmissionReason[]{
                 AdmissionReason.UID_UNKNOWN, AdmissionReason.UNBOUND, AdmissionReason.BINDING_CONFLICT}) {
-            when(tspDeviceAdmissionService.decide(any())).thenReturn(denyResult(reason));
+            when(viamDeviceAdmissionService.decide(any())).thenReturn(denyResult(reason));
 
             AuthAclService.AuthResult result = authAclService.authenticate(
                     "DEVICE-001", "client001", validPem, "10.0.0.8");
@@ -253,7 +275,7 @@ class AuthAclServiceImplTest {
 
     @Test
     void authenticate_identityMismatch_shouldMapTo804016() {
-        when(tspDeviceAdmissionService.decide(any())).thenReturn(denyResult(AdmissionReason.IDENTITY_MISMATCH));
+        when(viamDeviceAdmissionService.decide(any())).thenReturn(denyResult(AdmissionReason.IDENTITY_MISMATCH));
 
         AuthAclService.AuthResult result = authAclService.authenticate(
                 "DEVICE-001", "client001", validPem, "10.0.0.8");
@@ -268,7 +290,7 @@ class AuthAclServiceImplTest {
                 AdmissionReason.CERT_REVOKED, AdmissionReason.CERT_EXPIRED,
                 AdmissionReason.DEVICE_BLOCKED, AdmissionReason.DEVICE_RETIRED,
                 AdmissionReason.DEPENDENCY_UNAVAILABLE}) {
-            when(tspDeviceAdmissionService.decide(any())).thenReturn(denyResult(reason));
+            when(viamDeviceAdmissionService.decide(any())).thenReturn(denyResult(reason));
 
             AuthAclService.AuthResult result = authAclService.authenticate(
                     "DEVICE-001", "client001", validPem, "10.0.0.8");
@@ -279,8 +301,8 @@ class AuthAclServiceImplTest {
     }
 
     @Test
-    void authenticate_tspThrows_shouldFailClosedWith804002() {
-        when(tspDeviceAdmissionService.decide(any())).thenThrow(new RuntimeException("TSP unavailable"));
+    void authenticate_viamThrows_shouldFailClosedWith804002() {
+        when(viamDeviceAdmissionService.decide(any())).thenThrow(new RuntimeException("VIAM unavailable"));
 
         AuthAclService.AuthResult result = authAclService.authenticate(
                 "DEVICE-001", "client001", validPem, "10.0.0.8");
@@ -288,12 +310,12 @@ class AuthAclServiceImplTest {
         assertFalse(result.allowed());
         assertEquals(ErrorCode.DEVICE_BLOCKED, result.errorCode());
         assertEquals("DEPENDENCY_UNAVAILABLE", result.reason());
-        verify(metrics).incTspAdmission("DENY", "DEPENDENCY_UNAVAILABLE");
+        verify(metrics).incViamAdmission("DENY", "DEPENDENCY_UNAVAILABLE");
     }
 
     @Test
     void authenticate_nullTspResponse_shouldFailClosedWith804002() {
-        when(tspDeviceAdmissionService.decide(any())).thenReturn(null);
+        when(viamDeviceAdmissionService.decide(any())).thenReturn(null);
 
         AuthAclService.AuthResult result = authAclService.authenticate(
                 "DEVICE-001", "client001", validPem, "10.0.0.8");
@@ -305,7 +327,7 @@ class AuthAclServiceImplTest {
 
     @Test
     void authenticate_nullDecision_shouldFailClosedWith804002() {
-        when(tspDeviceAdmissionService.decide(any())).thenReturn(DeviceAdmissionResultVo.builder().build());
+        when(viamDeviceAdmissionService.decide(any())).thenReturn(DeviceAdmissionResultVo.builder().build());
 
         AuthAclService.AuthResult result = authAclService.authenticate(
                 "DEVICE-001", "client001", validPem, "10.0.0.8");
@@ -324,7 +346,7 @@ class AuthAclServiceImplTest {
         assertFalse(result.allowed());
         assertEquals(ErrorCode.AUTH_IDENTITY_MISMATCH, result.errorCode());
         assertEquals("ADMISSION_NOT_READY", result.reason());
-        verifyNoInteractions(tspDeviceAdmissionService);
+        verifyNoInteractions(viamDeviceAdmissionService);
     }
 
     @Test
@@ -335,12 +357,12 @@ class AuthAclServiceImplTest {
                 authAclService.authenticate(null, "client001", validPem, "10.0.0.8").errorCode());
         assertEquals(ErrorCode.DEVICE_UNKNOWN,
                 authAclService.authenticate("invalid@sn", "client001", validPem, "10.0.0.8").errorCode());
-        verifyNoInteractions(tspDeviceAdmissionService);
+        verifyNoInteractions(viamDeviceAdmissionService);
     }
 
     @Test
     void authenticate_lowercaseDeviceSn_shouldNormalize() {
-        when(tspDeviceAdmissionService.decide(any())).thenReturn(allowResult());
+        when(viamDeviceAdmissionService.decide(any())).thenReturn(allowResult());
 
         AuthAclService.AuthResult result = authAclService.authenticate(
                 "device-001", "client001", validPem, "10.0.0.8");

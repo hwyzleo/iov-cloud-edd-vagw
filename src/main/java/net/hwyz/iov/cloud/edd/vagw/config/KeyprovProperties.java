@@ -14,9 +14,10 @@ import java.time.Duration;
  * </p>
  * <p>
  * CR-016 新增容量／线程／超时／熔断配置：{@code max-in-flight}、{@code queue-capacity}、
- * {@code queue-wait}、{@code worker-count}、{@code vmd.deadline} 与 {@code circuit-breaker.*}。
- * Feign 连接／读取超时使用官方 Client 配置前缀（{@code vmdKeyProvisioningService}）并受统一
- * deadline 约束；不新增 {@code vmd.max-connections} 或 per-client 物理连接池配置。这些字段本身不设方法级默认值（{@code 0}/{@code null}），
+ * {@code queue-wait}、{@code worker-count}、{@code viam.deadline} 与 {@code circuit-breaker.*}
+ * （owner 由 EDD-VAGW-DSN-CR-019 切换：vmd → viam）。
+ * Feign 连接／读取超时使用官方 Client 配置前缀（{@code viamKeyProvisioningService}）并受统一
+ * deadline 约束；不新增 {@code viam.max-connections} 或 per-client 物理连接池配置。这些字段本身不设方法级默认值（{@code 0}/{@code null}），
  * 由 {@code KeyprovStartupGuard} 在 {@code enabled=true} 时统一校验正数、范围与字段关系并
  * fail-fast；{@code application.yml} 提供保守的 dev/CI 默认值，生产环境经环境变量覆盖。
  * </p>
@@ -69,24 +70,24 @@ public class KeyprovProperties {
     /** 排队最大等待时间；默认 {@code 0} 表示不等待，许可耗尽立即拒绝。 */
     private Duration queueWait = Duration.ZERO;
 
-    /** VMD 调用与并发参数（{@code vagw.keyprov.vmd.*}）。 */
-    private Vmd vmd = new Vmd();
+    /** VIAM 调用与并发参数（{@code vagw.keyprov.viam.*}）。 */
+    private Viam viam = new Viam();
 
     /** 专属熔断器配置。 */
     private CircuitBreaker circuitBreaker = new CircuitBreaker();
 
     /**
-     * VMD 调用与并发参数。
+     * VIAM 调用与并发参数。
      */
     @Data
-    public static class Vmd {
+    public static class Viam {
 
-        /** VMD 单次调用的统一 absolute deadline；{@code null} 表示未绑定，由启动门禁 fail-fast。 */
+        /** VIAM 单次调用的统一 absolute deadline；{@code null} 表示未绑定，由启动门禁 fail-fast。 */
         private Duration deadline;
     }
 
     /**
-     * Keyprov 专属熔断器配置（仅统计 VMD 连接失败/超时/依赖不可用）。
+     * Keyprov 专属熔断器配置（仅统计 VIAM 连接失败/超时/依赖不可用）。
      */
     @Data
     public static class CircuitBreaker {

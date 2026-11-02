@@ -5,7 +5,7 @@ import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovCircuitBreaker;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovExecutor;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovStartupGuard;
 import net.hwyz.iov.cloud.edd.vagw.service.KeyprovMetrics;
-import net.hwyz.iov.cloud.edd.vmd.api.service.VmdKeyProvisioningService;
+import net.hwyz.iov.cloud.sec.viam.api.service.ViamKeyProvisioningService;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -37,7 +37,7 @@ class KeyprovConfigurationContextTest {
     private static String[] validProperties() {
         return new String[]{
                 "vagw.keyprov.max-in-flight=2",
-                "vagw.keyprov.vmd.deadline=2s",
+                "vagw.keyprov.viam.deadline=2s",
                 "vagw.keyprov.circuit-breaker.failure-window=30s",
                 "vagw.keyprov.circuit-breaker.open-duration=15s",
                 "vagw.keyprov.circuit-breaker.half-open-probes=2"
@@ -51,7 +51,7 @@ class KeyprovConfigurationContextTest {
 
     @Test
     void defaultEnabled_shouldCreateKeyprovComponents() {
-        runner.withBean(VmdKeyProvisioningService.class, () -> mock(VmdKeyProvisioningService.class))
+        runner.withBean(ViamKeyProvisioningService.class, () -> mock(ViamKeyProvisioningService.class))
                 .withPropertyValues(validProperties())
                 .run(context -> {
                     assertNull(context.getStartupFailure());
@@ -78,13 +78,13 @@ class KeyprovConfigurationContextTest {
     void enabledWithoutOfficialFeignBean_shouldFailStartup() {
         runner.withPropertyValues(validProperties())
                 .run(context -> assertNotNull(context.getStartupFailure(),
-                        "缺少官方 VmdKeyProvisioningService Bean 必须 fail-fast"));
+                        "缺少官方 ViamKeyProvisioningService Bean 必须 fail-fast"));
     }
 
     @Test
     void invalidCapacity_shouldFailStartup() {
-        runner.withBean(VmdKeyProvisioningService.class, () -> mock(VmdKeyProvisioningService.class))
-                .withPropertyValues("vagw.keyprov.max-in-flight=0", "vagw.keyprov.vmd.deadline=2s")
+        runner.withBean(ViamKeyProvisioningService.class, () -> mock(ViamKeyProvisioningService.class))
+                .withPropertyValues("vagw.keyprov.max-in-flight=0", "vagw.keyprov.viam.deadline=2s")
                 .run(context -> assertNotNull(context.getStartupFailure(),
                         "非法容量配置必须 fail-fast"));
     }
@@ -101,9 +101,9 @@ class KeyprovConfigurationContextTest {
 
     @Test
     void missingDeadline_shouldFailStartup() {
-        runner.withBean(VmdKeyProvisioningService.class, () -> mock(VmdKeyProvisioningService.class))
+        runner.withBean(ViamKeyProvisioningService.class, () -> mock(ViamKeyProvisioningService.class))
                 .withPropertyValues("vagw.keyprov.max-in-flight=2")
                 .run(context -> assertNotNull(context.getStartupFailure(),
-                        "缺少 vmd.deadline 必须 fail-fast"));
+                        "缺少 viam.deadline 必须 fail-fast"));
     }
 }

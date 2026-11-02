@@ -27,8 +27,8 @@ import java.util.HexFormat;
  * keyprov relay 编排服务（EDD-VAGW-DSN-CR-011 §3.4/§7，由 EDD-VAGW-DSN-CR-016 §2 增量修订）。
  * <p>
  * 本服务作为 Keyprov 专属执行器任务体运行：MQTT ingress 完成门禁并获得专属并发许可后，将最小
- * 不可变任务提交到 {@code KeyprovExecutor}，本服务在其线程内执行阻塞式 VMD 调用与编排。
- * 职责仅限：generation guard、correlation、VMD 调用与下行结果映射，保留 requestId/idempotencyKey。
+ * 不可变任务提交到 {@code KeyprovExecutor}，本服务在其线程内执行阻塞式 VIM 调用与编排。
+ * 职责仅限：generation guard、correlation、VIM 调用与下行结果映射，保留 requestId/idempotencyKey。
  * 不负责设备绑定裁决、业务授权、选钥、businessKeyVersion、KMS Wrap、导入 ACK 业务完成或激活状态。
  * 不写 Kafka/DLQ/DB/Redis/Outbox；Wrapped Key、parameters、importProof 只在调用栈内短暂透传。
  * </p>
@@ -43,7 +43,7 @@ public class KeyprovRelayAppService {
     private final KeyprovContractGuard contractGuard;
     private final KeyprovProtocolValidator protocolValidator;
     private final KeyprovInbox inbox;
-    private final VmdKeyProvisioningGateway vmdGateway;
+    private final ViamKeyProvisioningGateway viamGateway;
     private final KeyprovEnvelopeFactory envelopeFactory;
     private final KeyprovMqttDownlinkPublisher downlinkPublisher;
     private final SessionService sessionService;
@@ -77,7 +77,7 @@ public class KeyprovRelayAppService {
 
         // validator 已按同一 readiness 门控校验；此处不再重新解析/判断 PayloadType 方向
 
-        // 传输层短期去重：相同 messageId+摘要不重复调用 VMD；不同摘要冲突 fail-closed
+        // 传输层短期去重：相同 messageId+摘要不重复调用 VIAM；不同摘要冲突 fail-closed
         KeyprovInbox.State state = inbox.record(uplink.getMessageId(), sha256(rawEnvelope));
         if (state == KeyprovInbox.State.CONFLICT) {
             log.warn("keyprov uplink digest conflict: messageId={}", uplink.getMessageId());
@@ -90,16 +90,16 @@ public class KeyprovRelayAppService {
             return KeyprovRelayResult.duplicate(uplink.getMessageId());
         }
 
-        VmdRelayResult response;
+        ViamRelayResult response;
         byte[] canonicalPayload = uplink.getPayload().toByteArray();
         try {
-            response = vmdGateway.relay(new VmdKeyProvisioningCommand(context, uplink, canonicalPayload));
+            response = viamGateway.relay(new ViamKeyProvisioningCommand(context, uplink, canonicalPayload));
         } catch (Exception e) {
-            log.error("keyprov VMD relay failed: requestId={}, messageId={}",
+            log.error("keyprov VIAM relay failed: requestId={}, messageId={}",
                     uplink.getRequestId(), uplink.getMessageId(), e);
             inbox.forget(uplink.getMessageId());
             metrics.downlink("not_delivered");
-            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_VMD_UNAVAILABLE, uplink.getMessageId());
+            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_VIAM_UNAVAILABLE, uplink.getMessageId());
         } finally {
             // 敏感 canonical payload 引用在处理终态立即释放（清零），不进入后续日志/持久化
             Arrays.fill(canonicalPayload, (byte) 0);
@@ -107,7 +107,7 @@ public class KeyprovRelayAppService {
         if (response == null) {
             inbox.forget(uplink.getMessageId());
             metrics.downlink("not_delivered");
-            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_VMD_UNAVAILABLE, uplink.getMessageId());
+            return KeyprovRelayResult.fail(KeyprovReason.KEYPROV_VIAM_UNAVAILABLE, uplink.getMessageId());
         }
 
         if (!response.hasPayload()) {
@@ -165,7 +165,7 @@ public class KeyprovRelayAppService {
             metrics.downlink("delivered");
             return KeyprovRelayResult.delivered(uplink.getMessageId(), topic);
         } finally {
-            // 任务终态（成功/失败/stale/deadline）立即释放 VMD 返回的敏感下行 payload 引用
+            // 任务终态（成功/失败/stale/deadline）立即释放 VIAM 返回的敏感下行 payload 引用
             if (response.downlinkPayload() != null) {
                 Arrays.fill(response.downlinkPayload(), (byte) 0);
             }
@@ -174,15 +174,15 @@ public class KeyprovRelayAppService {
 
     private static KeyprovReason mapNoPayloadReason(KeyprovOutcome outcome) {
         if (outcome == null) {
-            return KeyprovReason.KEYPROV_VMD_UNAVAILABLE;
+            return KeyprovReason.KEYPROV_VIAM_UNAVAILABLE;
         }
         return switch (outcome) {
-            case REJECTED -> KeyprovReason.KEYPROV_VMD_REJECTED;
-            case UNAVAILABLE -> KeyprovReason.KEYPROV_VMD_UNAVAILABLE;
-            case OUTCOME_UNKNOWN -> KeyprovReason.KEYPROV_OUTCOME_UNKNOWN;
-            case TIMEOUT -> KeyprovReason.KEYPROV_VMD_TIMEOUT;
+            case REJECTED -> KeyprovReason.KEYPROV_VIAM_REJECTED;
+            case UNAVAILABLE -> KeyprovReason.KEYPROV_VIAM_UNAVAILABLE;
+            case OUTCOME_UNKNOWN -> KeyprovReason.KEYPROV_VIAM_OUTCOME_UNKNOWN;
+            case TIMEOUT -> KeyprovReason.KEYPROV_VIAM_TIMEOUT;
             case CIRCUIT_OPEN -> KeyprovReason.KEYPROV_CIRCUIT_OPEN;
-            case SUCCESS -> KeyprovReason.KEYPROV_VMD_UNAVAILABLE;
+            case SUCCESS -> KeyprovReason.KEYPROV_VIAM_UNAVAILABLE;
         };
     }
 

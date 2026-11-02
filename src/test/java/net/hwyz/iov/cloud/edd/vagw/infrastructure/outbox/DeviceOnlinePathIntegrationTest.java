@@ -112,7 +112,7 @@ class DeviceOnlinePathIntegrationTest {
     private void givenAdmissionContext() {
         when(registry.findCandidate(HSM_UID, "client1")).thenReturn(Optional.of(
                 new AdmissionSessionContext(HSM_UID, "VIN1", "CERT", "client1", null, null,
-                        12L, Instant.now(), Instant.now().plusSeconds(300))));
+                        12L, Instant.now(), Instant.now().plusSeconds(300), "ADM-test", 1L, 0L)));
         when(sessionService.getSessionByDeviceSn(HSM_UID)).thenReturn(Optional.empty());
     }
 

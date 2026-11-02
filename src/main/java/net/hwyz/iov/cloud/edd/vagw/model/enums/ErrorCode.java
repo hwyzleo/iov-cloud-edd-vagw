@@ -15,11 +15,11 @@ public enum ErrorCode {
     VEHICLE_OFFLINE(804007, "下行目标车辆离线"),
     VIN_UNAUTHORIZED(804008, "下行目标 VIN 未知 / 未绑定 / 无权限"),
     ACL_SYNC_FAILED(804009, "ACL 下发 / 同步失败"),
-    DEPENDENCY_UNAVAILABLE(804010, "依赖服务不可用（TSP / KMS / keyprov）"),
+    DEPENDENCY_UNAVAILABLE(804010, "依赖服务不可用（VIAM / keyprov）"),
     MESSAGE_EXPIRED(804011, "下行消息过期（TTL 超时）"),
     MQTT_PUBLISH_FAILED(804012, "MQTT 下行发布失败"),
     BINDING_CONFLICT(804013, "绑定冲突（同 VIN 多条 ACTIVE TBOX）"),
-    BINDING_DEPENDENCY_UNAVAILABLE(804014, "绑定反查依赖（TSP）不可用"),
+    BINDING_DEPENDENCY_UNAVAILABLE(804014, "绑定反查依赖（VIAM）不可用"),
     BINDING_CONTEXT_MISSING(804015, "上行会话/绑定上下文缺失"),
     AUTH_IDENTITY_MISMATCH(804016, "连接认证身份不一致或证书身份非法（拒绝接入）"),
     KEYPROV_UPSTREAM_FAILURE(804017, "keyprov 上游（VMD）失败（fail-closed，稳定 reason 见 KeyprovReason）");

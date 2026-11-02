@@ -54,6 +54,11 @@ public class SessionService {
      */
     public void onConnected(String deviceSn, String clientId, String sourceIp, Integer protoVer,
                             Long generation, String deviceOnlineEventId) {
+        onConnected(deviceSn, clientId, sourceIp, protoVer, generation, deviceOnlineEventId, null);
+    }
+
+    public void onConnected(String deviceSn, String clientId, String sourceIp, Integer protoVer,
+                            Long generation, String deviceOnlineEventId, Long authorizedSecurityVersion) {
         try {
             // Resolve VIN for northbound enrichment
             String vin = bindingService.resolveVin(deviceSn).orElse(null);
@@ -77,6 +82,7 @@ public class SessionService {
                     .brokerSessionId(clientId)
                     .certSerial(identity == null ? null : identity.certSerial())
                     .certFingerprint(identity == null ? null : identity.certFingerprint())
+                    .authorizedSecurityVersion(authorizedSecurityVersion)
                     .lastDeviceOnlineEventId(deviceOnlineEventId)
                     .build();
 

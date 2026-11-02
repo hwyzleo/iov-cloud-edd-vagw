@@ -2,8 +2,8 @@ package net.hwyz.iov.cloud.edd.vagw.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import net.hwyz.iov.cloud.edd.vagw.infrastructure.client.TspResolveResult;
-import net.hwyz.iov.cloud.edd.vagw.infrastructure.client.TspVehicleAccessIdentityClient;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.client.ViamResolveResult;
+import net.hwyz.iov.cloud.edd.vagw.infrastructure.client.ViamVehicleAccessIdentityClient;
 import net.hwyz.iov.cloud.edd.vagw.model.binding.BindingSource;
 import net.hwyz.iov.cloud.edd.vagw.model.binding.VehicleAccessBinding;
 import org.junit.jupiter.api.BeforeEach;
@@ -40,7 +40,7 @@ class BindingServiceTest {
     private ValueOperations<String, String> valueOperations;
 
     @Mock
-    private TspVehicleAccessIdentityClient tspClient;
+    private ViamVehicleAccessIdentityClient viamClient;
 
     private ObjectMapper objectMapper;
     private BindingServiceImpl bindingService;
@@ -49,7 +49,7 @@ class BindingServiceTest {
     void setUp() {
         objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
-        bindingService = new BindingServiceImpl(redisTemplate, tspClient, objectMapper);
+        bindingService = new BindingServiceImpl(redisTemplate, viamClient, objectMapper);
         ReflectionTestUtils.setField(bindingService, "cacheTtlSeconds", 300L);
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
     }
@@ -67,28 +67,28 @@ class BindingServiceTest {
 
         assertEquals(ResolutionStatus.RESOLVED, r.status());
         assertEquals("DEVICE001", r.binding().getHsmUid());
-        verifyNoInteractions(tspClient);
+        verifyNoInteractions(viamClient);
     }
 
     @Test
     void resolveByVin_cacheMiss_shouldFallbackToTsp() {
         when(valueOperations.get("vagw:binding:vin:VIN-A")).thenReturn(null);
-        when(tspClient.resolveByVin("VIN-A"))
-                .thenReturn(TspResolveResult.resolved("VIN-A", "DEVICE001", "TBOX-1", 1L, Instant.now()));
+        when(viamClient.resolveByVin("VIN-A"))
+                .thenReturn(ViamResolveResult.resolved("VIN-A", "DEVICE001", "PR-1", "TBOX-1", 1L, Instant.now()));
 
         BindingResolution r = bindingService.resolveByVin("VIN-A");
 
         assertEquals(ResolutionStatus.RESOLVED, r.status());
         assertEquals("DEVICE001", r.binding().getHsmUid());
         assertEquals(1L, r.binding().getBindingVersion());
-        verify(tspClient).resolveByVin("VIN-A");
+        verify(viamClient).resolveByVin("VIN-A");
     }
 
     @Test
     void resolveByVin_tspUnbound_shouldReturnUnbound() {
         when(valueOperations.get("vagw:binding:vin:VIN-A")).thenReturn(null);
-        when(tspClient.resolveByVin("VIN-A"))
-                .thenReturn(TspResolveResult.unresolved("VIN-A", "UNBOUND"));
+        when(viamClient.resolveByVin("VIN-A"))
+                .thenReturn(ViamResolveResult.unresolved("VIN-A", "UNBOUND"));
 
         BindingResolution r = bindingService.resolveByVin("VIN-A");
 
@@ -100,8 +100,8 @@ class BindingServiceTest {
     @Test
     void resolveByVin_tspConflict_shouldReturnConflict() {
         when(valueOperations.get("vagw:binding:vin:VIN-A")).thenReturn(null);
-        when(tspClient.resolveByVin("VIN-A"))
-                .thenReturn(TspResolveResult.unresolved("VIN-A", "BINDING_CONFLICT"));
+        when(viamClient.resolveByVin("VIN-A"))
+                .thenReturn(ViamResolveResult.unresolved("VIN-A", "BINDING_CONFLICT"));
 
         BindingResolution r = bindingService.resolveByVin("VIN-A");
 
@@ -111,8 +111,8 @@ class BindingServiceTest {
     @Test
     void resolveByVin_tspDependencyUnavailable_shouldReturnDependency() {
         when(valueOperations.get("vagw:binding:vin:VIN-A")).thenReturn(null);
-        when(tspClient.resolveByVin("VIN-A"))
-                .thenReturn(TspResolveResult.unresolved("VIN-A", "DEPENDENCY_UNAVAILABLE"));
+        when(viamClient.resolveByVin("VIN-A"))
+                .thenReturn(ViamResolveResult.unresolved("VIN-A", "DEPENDENCY_UNAVAILABLE"));
 
         BindingResolution r = bindingService.resolveByVin("VIN-A");
 
@@ -124,7 +124,7 @@ class BindingServiceTest {
         BindingResolution r = bindingService.resolveByVin("  ");
 
         assertEquals(ResolutionStatus.CONTEXT_MISSING, r.status());
-        verifyNoInteractions(tspClient);
+        verifyNoInteractions(viamClient);
     }
 
     // ------------------------------------------------------------------
@@ -150,7 +150,7 @@ class BindingServiceTest {
 
         // 基础设施/上下文缺失 ≠ 真实 UNBOUND（不得静默等同）
         assertEquals(ResolutionStatus.CONTEXT_MISSING, r.status());
-        verifyNoInteractions(tspClient);
+        verifyNoInteractions(viamClient);
     }
 
     // ------------------------------------------------------------------
@@ -198,8 +198,8 @@ class BindingServiceTest {
     @Test
     void deprecated_resolveDeviceSn_shouldDelegateToTspFallback() {
         when(valueOperations.get("vagw:binding:vin:VIN-A")).thenReturn(null);
-        when(tspClient.resolveByVin("VIN-A"))
-                .thenReturn(TspResolveResult.resolved("VIN-A", "DEVICE001", "TBOX-1", 1L, Instant.now()));
+        when(viamClient.resolveByVin("VIN-A"))
+                .thenReturn(ViamResolveResult.resolved("VIN-A", "DEVICE001", "PR-1", "TBOX-1", 1L, Instant.now()));
 
         Optional<String> deviceSn = bindingService.resolveDeviceSn("VIN-A");
 
@@ -210,8 +210,8 @@ class BindingServiceTest {
     @Test
     void deprecated_resolveDeviceSn_unbound_shouldReturnEmpty() {
         when(valueOperations.get("vagw:binding:vin:VIN-A")).thenReturn(null);
-        when(tspClient.resolveByVin("VIN-A"))
-                .thenReturn(TspResolveResult.unresolved("VIN-A", "VIN_UNKNOWN"));
+        when(viamClient.resolveByVin("VIN-A"))
+                .thenReturn(ViamResolveResult.unresolved("VIN-A", "VIN_UNKNOWN"));
 
         assertTrue(bindingService.resolveDeviceSn("VIN-A").isEmpty());
     }
@@ -230,7 +230,7 @@ class BindingServiceTest {
                 .tboxSn("TBOX-1")
                 .bindingVersion(version)
                 .bindingUpdatedAt(Instant.now())
-                .source(BindingSource.ADMISSION)
+                .source(BindingSource.VIAM_ADMISSION)
                 .build();
     }
 }

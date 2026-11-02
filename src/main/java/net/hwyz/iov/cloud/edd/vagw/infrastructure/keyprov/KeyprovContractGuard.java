@@ -37,7 +37,7 @@ import java.util.Set;
  *   <li>构建期生成的 {@link KeyprovProtocolLock}：release、DescriptorSet SHA-256、registry digest、
  *       protoc/protobuf runtime、golden vector set digest；</li>
  *   <li>生成类字段/枚举自检（CR-008 ACK 字段 10/11、payload 原字节直传）；</li>
- *   <li>edd-vmd-api 是否包含 CR-062 的 {@code protocolRelease}/{@code descriptorSetHash} 语义。</li>
+ *   <li>sec-viam-api 是否包含协议锁版的 {@code protocolRelease}/{@code descriptorSetHash} 语义。</li>
  * </ul>
  * <p>
  * 任一失败只把 Keyprov capability 置为 NOT_READY（FOTA／远控／MQTT 连接不受影响），
@@ -103,13 +103,13 @@ public class KeyprovContractGuard {
         metrics.readiness(readiness.ready(), readiness.ready() ? "ready" : readiness.reason().name());
         if (readiness.ready()) {
             log.info("Keyprov readiness: READY, release={}, descriptorSetSha256={}, registryDigest={}, "
-                            + "protocVersion={}, protobufRuntimeVersion={}, goldenVectorSetDigest={}, eddVmdApiVersion={}",
+                            + "protocVersion={}, protobufRuntimeVersion={}, goldenVectorSetDigest={}, viamApiVersion={}",
                     lock.parProtoRelease(), lock.descriptorSetSha256(), lock.registryDigest(),
                     lock.protocVersion(), lock.protobufRuntimeVersion(), lock.goldenVectorSetDigest(),
-                    eddVmdApiVersion());
+                    viamApiVersion());
         } else {
-            log.error("Keyprov readiness: NOT_READY, reason={}, detail={}, conditions={}, eddVmdApiVersion={}",
-                    readiness.reason(), readiness.notReadyDetail(), readiness.snapshot(), eddVmdApiVersion());
+            log.error("Keyprov readiness: NOT_READY, reason={}, detail={}, conditions={}, viamApiVersion={}",
+                    readiness.reason(), readiness.notReadyDetail(), readiness.snapshot(), viamApiVersion());
         }
     }
 
@@ -166,7 +166,7 @@ public class KeyprovContractGuard {
         boolean descriptor = lockComplete && descriptorHashMatched(candidate);
         boolean packageRegistry = lockComplete && packageServiceProtocolRegistryMatched(candidate, registryBytes);
         boolean generated = lockComplete && generatedRuntimeSelfCheckPassed(candidate);
-        boolean vmdApi = vmdCr062ApiCompatible();
+        boolean viamApi = viamApiCompatible();
         boolean ackAdapter = keyprovAckCr008AdapterReady();
         boolean passthrough = canonicalPayloadPassthroughReady();
         boolean sensitiveGuard = lockComplete
@@ -187,9 +187,9 @@ public class KeyprovContractGuard {
         } else if (!generated) {
             reason = KeyprovReason.KEYPROV_RUNTIME_MISMATCH;
             detail = "protoc/protobuf runtime or generated field self-check does not match the protocol lock";
-        } else if (!vmdApi) {
-            reason = KeyprovReason.KEYPROV_VMD_API_INCOMPATIBLE;
-            detail = "edd-vmd-api is missing CR-062 protocolRelease/descriptorSetHash semantics";
+        } else if (!viamApi) {
+            reason = KeyprovReason.KEYPROV_VIAM_API_INCOMPATIBLE;
+            detail = "sec-viam-api is missing protocolRelease/descriptorSetHash semantics";
         } else if (!ackAdapter) {
             reason = KeyprovReason.KEYPROV_PROTOCOL_UNSUPPORTED;
             detail = "CR-008 ACK adapter self-check failed (fields 10/11 or length enums unavailable)";
@@ -213,7 +213,7 @@ public class KeyprovContractGuard {
                 descriptor,
                 packageRegistry,
                 generated,
-                vmdApi,
+                viamApi,
                 ackAdapter,
                 passthrough,
                 sensitiveGuard,
@@ -357,24 +357,23 @@ public class KeyprovContractGuard {
     }
 
     /**
-     * edd-vmd-api 是否包含 CR-062 语义（反射检查，容忍运行时 classpath 混入旧 artifact）。
+     * sec-viam-api 协议锁版语义（反射检查，容忍运行时 classpath 混入旧 artifact）。
      */
-    private static boolean vmdCr062ApiCompatible() {
+    private static boolean viamApiCompatible() {
         try {
-            Class<?> request = Class.forName(
-                    "net.hwyz.iov.cloud.edd.vmd.api.vo.keyprov.VmdKeyProvisioningRequest");
+            Class<?> request = Class.forName("net.hwyz.iov.cloud.sec.viam.api.vo.keyprov.ViamKeyProvisioningRequest");
             request.getMethod("getProtocolRelease");
             request.getMethod("getDescriptorSetHash");
             Class<?> builder = Class.forName(request.getName()
-                    + "$VmdKeyProvisioningRequestBuilder");
+                    + "$ViamKeyProvisioningRequestBuilder");
             builder.getMethod("protocolRelease", String.class);
             builder.getMethod("descriptorSetHash", String.class);
             Class<?> service = Class.forName(
-                    "net.hwyz.iov.cloud.edd.vmd.api.service.VmdKeyProvisioningService");
+                    "net.hwyz.iov.cloud.sec.viam.api.service.ViamKeyProvisioningService");
             service.getMethod("request", request);
             return true;
         } catch (Exception e) {
-            log.error("Keyprov lock: edd-vmd-api CR-062 compatibility check failed: {}", e.getMessage());
+            log.error("Keyprov lock: sec-viam-api compatibility check failed: {}", e.getMessage());
             return false;
         }
     }
@@ -448,11 +447,11 @@ public class KeyprovContractGuard {
         return props;
     }
 
-    /** edd-vmd-api artifact version（仅用于 readiness 结构化日志，不做版本字符串硬编码匹配）。 */
-    private static String eddVmdApiVersion() {
+    /** sec-viam-api artifact version（仅用于 readiness 结构化日志，不做版本字符串硬编码匹配）。 */
+    private static String viamApiVersion() {
         Properties props = new Properties();
         try (InputStream in = KeyprovContractGuard.class.getClassLoader()
-                .getResourceAsStream("META-INF/maven/net.hwyz.iov.cloud.edd/edd-vmd-api/pom.properties")) {
+                .getResourceAsStream("META-INF/maven/net.hwyz.iov.cloud.sec/sec-viam-api/pom.properties")) {
             if (in == null) {
                 return "unknown";
             }

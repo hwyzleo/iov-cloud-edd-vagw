@@ -63,7 +63,12 @@ public class DeviceOnlineEventFactory {
                 context.certSerial(),
                 null,
                 occurredAt,
-                timeSource);
+                timeSource,
+                context.admissionDecisionId(),
+                context.expiresAt(),
+                context.bindingVersion(),
+                context.vin(),
+                context.certSerial());
     }
 
     /**

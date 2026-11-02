@@ -15,10 +15,11 @@ import java.util.Set;
 /**
  * 设备准入配置（EDD-VAGW-DSN-CR-013 §7）。
  * <p>
- * 超时预算基线：framework PKI total-timeout=1s，VAGW→TSP read-timeout=1.5s，
+ * 超时预算基线：framework PKI total-timeout=1s，VAGW→VIAM read-timeout=1.5s，
  * EMQX→VAGW HTTP auth timeout 至少 2s；必须满足
  * {@code PKI total-timeout ≤ VAGW read-timeout - 250ms} 且
- * {@code VAGW read-timeout ≤ EMQX auth timeout - 500ms}。
+ * {@code VAGW read-timeout ≤ EMQX auth timeout - 500ms}（EDD-VAGW-DSN-CR-019 §7.1，
+ * owner 由 TSP 切换 VIAM，预算基线不变）。
  * </p>
  * <p>
  * {@code peer-certificate.required} 仅用于发布编排：生产固定 true；false 时设备准入能力
@@ -32,7 +33,7 @@ public class VagwAdmissionProperties {
 
     private PeerCertificate peerCertificate = new PeerCertificate();
 
-    private Tsp tsp = new Tsp();
+    private Viam viam = new Viam();
 
     private EmqxAuth emqxAuth = new EmqxAuth();
 
@@ -54,10 +55,14 @@ public class VagwAdmissionProperties {
     }
 
     /**
-     * VAGW → TSP 准入裁决调用配置。
+     * VAGW → VIAM 准入裁决调用配置（EDD-VAGW-DSN-CR-019 §7.1）。
+     * <p>
+     * 保持预算基线：connect 250ms / read 1500ms / 读超时不重试；
+     * 实际命中 sec-viam-api 官方 Feign 客户端（contextId=viamDeviceAdmissionService）。
+     * </p>
      */
     @Data
-    public static class Tsp {
+    public static class Viam {
         /** canonical 裁决路径（供部署登记与漂移核对） */
         private String path = "/api/service/deviceAdmission/v1/decide";
         private Duration connectTimeout = Duration.ofMillis(250);

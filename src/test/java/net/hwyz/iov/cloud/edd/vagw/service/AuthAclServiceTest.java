@@ -5,14 +5,14 @@ import net.hwyz.iov.cloud.edd.vagw.config.VagwAdmissionProperties;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovContractGuard;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.security.PeerCertificateContextFactory;
 import net.hwyz.iov.cloud.edd.vagw.model.enums.ErrorCode;
-import net.hwyz.iov.cloud.iov.tsp.api.service.TspDeviceAdmissionService;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionCheckVo;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.DeviceAdmissionResultVo;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.AdmissionDecision;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.AdmissionReason;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.BindStatus;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.CertificateStatus;
-import net.hwyz.iov.cloud.iov.tsp.api.vo.enums.DeviceStatus;
+import net.hwyz.iov.cloud.sec.viam.api.service.ViamDeviceAdmissionService;
+import net.hwyz.iov.cloud.sec.viam.api.vo.DeviceAdmissionCheckVo;
+import net.hwyz.iov.cloud.sec.viam.api.vo.DeviceAdmissionResultVo;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.AdmissionDecision;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.AdmissionReason;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.BindStatus;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.CertificateStatus;
+import net.hwyz.iov.cloud.sec.viam.api.vo.enums.DeviceStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,7 +37,7 @@ import static org.mockito.Mockito.*;
 class AuthAclServiceTest {
 
     @Mock
-    private TspDeviceAdmissionService tspDeviceAdmissionService;
+    private ViamDeviceAdmissionService viamDeviceAdmissionService;
     @Mock
     private BindingService bindingService;
     @Mock
@@ -54,7 +54,7 @@ class AuthAclServiceTest {
     void setUp() {
         VagwAdmissionProperties admissionProperties = new VagwAdmissionProperties();
         PeerCertificateContextFactory factory = new PeerCertificateContextFactory(admissionProperties);
-        authAclService = new AuthAclServiceImpl(tspDeviceAdmissionService, bindingService, keyprovProperties,
+        authAclService = new AuthAclServiceImpl(viamDeviceAdmissionService, bindingService, keyprovProperties,
                 keyprovContractGuard, factory, admissionProperties, metrics);
         validPem = resource("certs/leaf-valid.pem");
     }
@@ -69,12 +69,13 @@ class AuthAclServiceTest {
                 .deviceStatus(DeviceStatus.ACTIVATING)
                 .bindVersion(3L)
                 .updatedAt(Instant.parse("2026-10-12T00:00:00Z"))
+                .admissionDecisionId("ADM-authacltest")
                 .build();
     }
 
     @Test
     void authenticate_validDevice_shouldAllowAndRememberBinding() {
-        when(tspDeviceAdmissionService.decide(any(DeviceAdmissionCheckVo.class))).thenReturn(allowResult());
+        when(viamDeviceAdmissionService.decide(any(DeviceAdmissionCheckVo.class))).thenReturn(allowResult());
 
         AuthAclService.AuthResult result = authAclService.authenticate(
                 "DEVICE-001", "client001", validPem, "10.0.0.8");
@@ -91,7 +92,7 @@ class AuthAclServiceTest {
 
     @Test
     void authenticate_unboundDevice_shouldDenyWith804001() {
-        when(tspDeviceAdmissionService.decide(any(DeviceAdmissionCheckVo.class)))
+        when(viamDeviceAdmissionService.decide(any(DeviceAdmissionCheckVo.class)))
                 .thenReturn(DeviceAdmissionResultVo.builder()
                         .decision(AdmissionDecision.DENY)
                         .reason(AdmissionReason.UNBOUND)
@@ -106,7 +107,7 @@ class AuthAclServiceTest {
 
     @Test
     void authenticate_certRevoked_shouldDenyWith804002() {
-        when(tspDeviceAdmissionService.decide(any(DeviceAdmissionCheckVo.class)))
+        when(viamDeviceAdmissionService.decide(any(DeviceAdmissionCheckVo.class)))
                 .thenReturn(DeviceAdmissionResultVo.builder()
                         .decision(AdmissionDecision.DENY)
                         .reason(AdmissionReason.CERT_REVOKED)
@@ -121,7 +122,7 @@ class AuthAclServiceTest {
 
     @Test
     void authenticate_tspError_shouldDenyWith804002() {
-        when(tspDeviceAdmissionService.decide(any(DeviceAdmissionCheckVo.class)))
+        when(viamDeviceAdmissionService.decide(any(DeviceAdmissionCheckVo.class)))
                 .thenThrow(new RuntimeException("Service unavailable"));
 
         AuthAclService.AuthResult result = authAclService.authenticate(
@@ -148,7 +149,7 @@ class AuthAclServiceTest {
 
     @Test
     void authenticate_lowercaseDeviceSn_shouldNormalize() {
-        when(tspDeviceAdmissionService.decide(any(DeviceAdmissionCheckVo.class))).thenReturn(allowResult());
+        when(viamDeviceAdmissionService.decide(any(DeviceAdmissionCheckVo.class))).thenReturn(allowResult());
 
         AuthAclService.AuthResult result = authAclService.authenticate(
                 "device-001", "client001", validPem, "10.0.0.8");

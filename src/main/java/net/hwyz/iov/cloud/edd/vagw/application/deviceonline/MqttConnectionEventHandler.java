@@ -88,7 +88,7 @@ public class MqttConnectionEventHandler {
             try {
                 // 先固化可信会话事实（active generation = auth 候选 generation），再写待发布事件
                 sessionService.onConnected(hsmUid, clientId, request.getPeerHost(), request.getProtoVer(),
-                        context.connectionGeneration(), event.eventId());
+                        context.connectionGeneration(), event.eventId(), context.securityVersion());
                 DeviceOnlineOutboxStore.EnqueueResult result =
                         outboxStore.enqueue(event, hsmUid, payloadJson);
                 boolean duplicate = result == DeviceOnlineOutboxStore.EnqueueResult.DUPLICATE;

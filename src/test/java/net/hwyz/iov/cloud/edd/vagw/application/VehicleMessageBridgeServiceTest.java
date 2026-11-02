@@ -113,7 +113,7 @@ class VehicleMessageBridgeServiceTest {
                 .tboxSn("TBOX-1")
                 .bindingVersion(1L)
                 .bindingUpdatedAt(Instant.now())
-                .source(BindingSource.ADMISSION)
+                .source(BindingSource.VIAM_ADMISSION)
                 .build());
     }
 

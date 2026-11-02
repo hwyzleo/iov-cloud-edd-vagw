@@ -3,7 +3,7 @@ package net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
-import net.hwyz.iov.cloud.edd.vmd.api.service.VmdKeyProvisioningService;
+import net.hwyz.iov.cloud.sec.viam.api.service.ViamKeyProvisioningService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -15,11 +15,11 @@ import java.time.Duration;
  * <p>
  * {@code enabled=true} 时在启动阶段统一校验：
  * <ul>
- *   <li>edd-vmd-api 官方 Keyprov Service Feign Bean 必须存在——缺失即部署错误 fail-fast，
+ *   <li>sec-viam-api 官方 Keyprov Service Feign Bean 必须存在——缺失即部署错误 fail-fast，
  *       不得创建 Disabled Client 或第二套自定义 Feign 契约；</li>
  *   <li>容量／deadline／连接／熔断配置必须有安全边界且相互不矛盾。</li>
  * </ul>
- * 既没有显式配置、也没有安全默认值的字段（{@code max-in-flight}、{@code vmd.deadline}、
+ * 既没有显式配置、也没有安全默认值的字段（{@code max-in-flight}、{@code viam.deadline}、
  * 熔断窗口等绑定为 {@code 0}/{@code null}）视为缺失；绑定为 0、负数或组合矛盾同样 fail-fast。
  * </p>
  */
@@ -29,30 +29,30 @@ import java.time.Duration;
 public class KeyprovStartupGuard {
 
     private final KeyprovProperties properties;
-    private final ObjectProvider<VmdKeyProvisioningService> vmdService;
+    private final ObjectProvider<ViamKeyProvisioningService> viamService;
 
     public KeyprovStartupGuard(KeyprovProperties properties,
-                               ObjectProvider<VmdKeyProvisioningService> vmdService) {
+                               ObjectProvider<ViamKeyProvisioningService> viamService) {
         this.properties = properties;
-        this.vmdService = vmdService;
+        this.viamService = viamService;
     }
 
     @PostConstruct
     public void validate() {
-        requireOfficialVmdContract();
+        requireOfficialViamContract();
         validateCapacity();
         log.info("Keyprov startup guard passed: maxInFlight={}, workers={}, queueCapacity={}, queueWait={}, "
-                        + "vmdDeadline={}, circuitBreaker={}",
+                        + "viamDeadline={}, circuitBreaker={}",
                 properties.getMaxInFlight(), properties.effectiveWorkerCount(), properties.getQueueCapacity(),
-                properties.getQueueWait(), properties.getVmd().getDeadline(),
+                properties.getQueueWait(), properties.getViam().getDeadline(),
                 properties.getCircuitBreaker() == null ? null : properties.getCircuitBreaker().isEnabled());
     }
 
-    private void requireOfficialVmdContract() {
-        if (vmdService.getIfAvailable() == null) {
+    private void requireOfficialViamContract() {
+        if (viamService.getIfAvailable() == null) {
             throw new IllegalStateException(
-                    "vagw.keyprov.enabled=true but the official edd-vmd-api Keyprov Service Feign bean "
-                            + "(VmdKeyProvisioningService) is missing; VAGW must not create a Disabled Client "
+                    "vagw.keyprov.enabled=true but the official sec-viam-api Keyprov Service Feign bean "
+                            + "(ViamKeyProvisioningService) is missing; VAGW must not create a Disabled Client "
                             + "or a second custom @FeignClient/URL/DTO/fallback");
         }
     }
@@ -69,9 +69,9 @@ public class KeyprovStartupGuard {
         if (properties.getQueueWait() != null && properties.getQueueWait().isNegative()) {
             fail("vagw.keyprov.queue-wait must be >= 0");
         }
-        Duration deadline = properties.getVmd().getDeadline();
+        Duration deadline = properties.getViam().getDeadline();
         if (deadline == null || deadline.isZero() || deadline.isNegative()) {
-            fail("vagw.keyprov.vmd.deadline must be > 0 when keyprov is enabled");
+            fail("vagw.keyprov.viam.deadline must be > 0 when keyprov is enabled");
         }
         validateCircuitBreaker();
     }

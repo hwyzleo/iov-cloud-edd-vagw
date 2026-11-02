@@ -71,7 +71,7 @@ public class MqttAuthRequest {
     private String peerCert;
 
     /**
-     * 客户端IP地址（EMQX peerhost，仅作为可信来源 IP 传给 TSP 审计）
+     * 客户端IP地址（EMQX peerhost，仅作为可信来源 IP 传给 VIAM 审计）
      */
     @JsonProperty("peer_host")
     private String peerHost;

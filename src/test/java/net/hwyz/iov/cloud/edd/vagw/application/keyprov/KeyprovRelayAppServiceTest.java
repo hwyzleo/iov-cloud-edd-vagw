@@ -2,7 +2,7 @@ package net.hwyz.iov.cloud.edd.vagw.application.keyprov;
 
 import net.hwyz.iov.cloud.edd.vagw.adapter.mqtt.KeyprovMqttDownlinkPublisher;
 import net.hwyz.iov.cloud.edd.vagw.config.KeyprovProperties;
-import net.hwyz.iov.cloud.edd.vagw.application.keyprov.VmdKeyProvisioningGateway;
+import net.hwyz.iov.cloud.edd.vagw.application.keyprov.ViamKeyProvisioningGateway;
 import net.hwyz.iov.cloud.edd.vagw.service.KeyprovMetrics;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovContractGuard;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.keyprov.KeyprovInbox;
@@ -46,7 +46,7 @@ class KeyprovRelayAppServiceTest {
     @Mock
     private KeyprovInbox inbox;
     @Mock
-    private VmdKeyProvisioningGateway vmdGateway;
+    private ViamKeyProvisioningGateway viamGateway;
     @Mock
     private KeyprovEnvelopeFactory envelopeFactory;
     @Mock
@@ -63,7 +63,7 @@ class KeyprovRelayAppServiceTest {
         properties = new KeyprovProperties();
         properties.setEnabled(true);
         service = new KeyprovRelayAppService(properties, contractGuard, protocolValidator, inbox,
-                vmdGateway, envelopeFactory, downlinkPublisher, sessionService, metrics);
+                viamGateway, envelopeFactory, downlinkPublisher, sessionService, metrics);
     }
 
     private static KeyprovReadiness readyReadiness() {
@@ -91,7 +91,7 @@ class KeyprovRelayAppServiceTest {
 
     private void stubDeliveryPath(String downlinkType, byte[] payload) {
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
-        when(vmdGateway.relay(any())).thenReturn(new VmdRelayResult("req-001", downlinkType, payload,
+        when(viamGateway.relay(any())).thenReturn(new ViamRelayResult("req-001", downlinkType, payload,
                 123L, KeyprovOutcome.SUCCESS, null, false));
         when(protocolValidator.isAllowedDownlinkPayloadType(downlinkType)).thenReturn(true);
         when(sessionService.isGenerationCurrent("DEVICE001", 3L)).thenReturn(true);
@@ -106,17 +106,17 @@ class KeyprovRelayAppServiceTest {
     }
 
     @Test
-    void relay_disabled_shouldFailClosedWithoutVmd() {
+    void relay_disabled_shouldFailClosedWithoutViam() {
         properties.setEnabled(false);
         KeyprovRelayResult result = service.relay(context(), uplink(), uplink().toByteArray());
 
         assertFalse(result.delivered());
         assertEquals(KeyprovReason.KEYPROV_DISABLED, result.reason());
-        verifyNoInteractions(vmdGateway);
+        verifyNoInteractions(viamGateway);
     }
 
     @Test
-    void relay_contractIncompatible_shouldFailClosedWithoutVmd() {
+    void relay_contractIncompatible_shouldFailClosedWithoutViam() {
         when(contractGuard.readiness()).thenReturn(new KeyprovReadiness(false,
                 KeyprovReason.KEYPROV_PROTOCOL_UNSUPPORTED, "drift",
                 false, false, false, false, false, false, false, false, false));
@@ -125,11 +125,11 @@ class KeyprovRelayAppServiceTest {
 
         assertFalse(result.delivered());
         assertEquals(KeyprovReason.KEYPROV_PROTOCOL_UNSUPPORTED, result.reason());
-        verifyNoInteractions(vmdGateway);
+        verifyNoInteractions(viamGateway);
     }
 
     @Test
-    void relay_validatorFailure_shouldNotCallVmd() {
+    void relay_validatorFailure_shouldNotCallViam() {
         when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(protocolValidator.validateUplink(any(), any(), any()))
                 .thenReturn(new KeyprovProtocolValidator.Failure(KeyprovReason.KEYPROV_PAYLOAD_INVALID, "bad"));
@@ -139,7 +139,7 @@ class KeyprovRelayAppServiceTest {
         assertFalse(result.delivered());
         assertEquals(KeyprovReason.KEYPROV_PAYLOAD_INVALID, result.reason());
         assertEquals(ErrorCode.KEYPROV_UPSTREAM_FAILURE, result.errorCode());
-        verifyNoInteractions(vmdGateway);
+        verifyNoInteractions(viamGateway);
     }
 
     @Test
@@ -156,14 +156,14 @@ class KeyprovRelayAppServiceTest {
     }
 
     @Test
-    void relay_duplicateMessage_shouldSkipVmd() {
+    void relay_duplicateMessage_shouldSkipViam() {
         when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.DUPLICATE);
 
         KeyprovRelayResult result = service.relay(context(), uplink(), uplink().toByteArray());
 
         assertTrue(result.delivered());
-        verifyNoInteractions(vmdGateway);
+        verifyNoInteractions(viamGateway);
     }
 
     @Test
@@ -175,7 +175,7 @@ class KeyprovRelayAppServiceTest {
 
         assertFalse(result.delivered());
         assertEquals(KeyprovReason.KEYPROV_PAYLOAD_INVALID, result.reason());
-        verifyNoInteractions(vmdGateway);
+        verifyNoInteractions(viamGateway);
     }
 
     @Test
@@ -200,7 +200,7 @@ class KeyprovRelayAppServiceTest {
                 .setPayloadType("security.keyprov.v1.KeyProvisioningAck")
                 .setPayload(com.google.protobuf.ByteString.copyFrom(new byte[]{1})).build();
         when(inbox.record(eq("ack-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
-        when(vmdGateway.relay(any())).thenReturn(new VmdRelayResult("req-001", ACK_RESULT_TYPE,
+        when(viamGateway.relay(any())).thenReturn(new ViamRelayResult("req-001", ACK_RESULT_TYPE,
                 new byte[]{7}, null, KeyprovOutcome.SUCCESS, null, false));
         when(protocolValidator.isAllowedDownlinkPayloadType(ACK_RESULT_TYPE)).thenReturn(true);
         when(sessionService.isGenerationCurrent("DEVICE001", 3L)).thenReturn(true);
@@ -217,7 +217,7 @@ class KeyprovRelayAppServiceTest {
     void relay_wrongDownlinkType_shouldFailClosedAndNotPublish() throws Exception {
         when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
-        when(vmdGateway.relay(any())).thenReturn(new VmdRelayResult("req-001", ACK_RESULT_TYPE, new byte[]{9},
+        when(viamGateway.relay(any())).thenReturn(new ViamRelayResult("req-001", ACK_RESULT_TYPE, new byte[]{9},
                 123L, KeyprovOutcome.SUCCESS, null, false));
 
         KeyprovRelayResult result = service.relay(context(), uplink(), uplink().toByteArray());
@@ -228,24 +228,24 @@ class KeyprovRelayAppServiceTest {
     }
 
     @Test
-    void relay_vmdRejectedNoPayload_shouldFailWithRejected() {
+    void relay_viamRejectedNoPayload_shouldFailWithRejected() {
         when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
-        when(vmdGateway.relay(any())).thenReturn(VmdRelayResult.rejected("req-001", KeyprovReason.KEYPROV_VMD_REJECTED));
+        when(viamGateway.relay(any())).thenReturn(ViamRelayResult.rejected("req-001", KeyprovReason.KEYPROV_VIAM_REJECTED));
 
         KeyprovRelayResult result = service.relay(context(), uplink(), uplink().toByteArray());
 
         assertFalse(result.delivered());
-        assertEquals(KeyprovReason.KEYPROV_VMD_REJECTED, result.reason());
+        assertEquals(KeyprovReason.KEYPROV_VIAM_REJECTED, result.reason());
     }
 
     @Test
-    void relay_vmdRejectedWithCanonicalPayload_shouldPublishDownlink() throws Exception {
+    void relay_viamRejectedWithCanonicalPayload_shouldPublishDownlink() throws Exception {
         when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
         byte[] rejectPayload = new byte[]{11, 12};
-        when(vmdGateway.relay(any())).thenReturn(new VmdRelayResult("req-001", RESP_TYPE, rejectPayload,
-                null, KeyprovOutcome.REJECTED, KeyprovReason.KEYPROV_REQUEST_INVALID, false));
+        when(viamGateway.relay(any())).thenReturn(new ViamRelayResult("req-001", RESP_TYPE, rejectPayload,
+                null, KeyprovOutcome.REJECTED, KeyprovReason.KEYPROV_VIAM_REQUEST_INVALID, false));
         when(protocolValidator.isAllowedDownlinkPayloadType(RESP_TYPE)).thenReturn(true);
         when(sessionService.isGenerationCurrent("DEVICE001", 3L)).thenReturn(true);
         when(envelopeFactory.buildDownlink(any(), any(), eq(RESP_TYPE), eq(rejectPayload), any()))
@@ -255,64 +255,64 @@ class KeyprovRelayAppServiceTest {
 
         KeyprovRelayResult result = service.relay(context(), uplink(), uplink().toByteArray());
 
-        // VMD 显式拒绝且返回 canonical ProtocolError：必须下发，车端据 error.retryable 收敛（不再盲重投）
+        // VIAM 显式拒绝且返回 canonical ProtocolError：必须下发，车端据 error.retryable 收敛（不再盲重投）
         assertTrue(result.delivered());
         assertEquals("vehicle/DEVICE001/down/keyprov", result.downlinkTopic());
         verify(downlinkPublisher).publish(eq("DEVICE001"), any(byte[].class));
     }
 
     @Test
-    void relay_vmdUnavailable_shouldFailClosed() {
+    void relay_viamUnavailable_shouldFailClosed() {
         when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
-        when(vmdGateway.relay(any())).thenReturn(VmdRelayResult.unavailable(KeyprovReason.KEYPROV_VMD_UNAVAILABLE));
+        when(viamGateway.relay(any())).thenReturn(ViamRelayResult.unavailable(KeyprovReason.KEYPROV_VIAM_UNAVAILABLE));
 
         KeyprovRelayResult result = service.relay(context(), uplink(), uplink().toByteArray());
 
-        assertEquals(KeyprovReason.KEYPROV_VMD_UNAVAILABLE, result.reason());
+        assertEquals(KeyprovReason.KEYPROV_VIAM_UNAVAILABLE, result.reason());
     }
 
     @Test
-    void relay_vmdOutcomeUnknown_shouldNotCreateNewRequestId() {
+    void relay_viamOutcomeUnknown_shouldNotCreateNewRequestId() {
         when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
-        when(vmdGateway.relay(any())).thenReturn(VmdRelayResult.outcomeUnknown("req-001", KeyprovReason.KEYPROV_OUTCOME_UNKNOWN));
+        when(viamGateway.relay(any())).thenReturn(ViamRelayResult.outcomeUnknown("req-001", KeyprovReason.KEYPROV_VIAM_OUTCOME_UNKNOWN));
 
         KeyprovRelayResult result = service.relay(context(), uplink(), uplink().toByteArray());
 
-        assertEquals(KeyprovReason.KEYPROV_OUTCOME_UNKNOWN, result.reason());
+        assertEquals(KeyprovReason.KEYPROV_VIAM_OUTCOME_UNKNOWN, result.reason());
         assertEquals("up-msg-001", result.messageId());
         verifyNoInteractions(downlinkPublisher);
     }
 
     @Test
-    void relay_vmdThrows_shouldFailWithUnavailable() {
+    void relay_viamThrows_shouldFailWithUnavailable() {
         when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
-        when(vmdGateway.relay(any())).thenThrow(new RuntimeException("timeout"));
+        when(viamGateway.relay(any())).thenThrow(new RuntimeException("timeout"));
 
         KeyprovRelayResult result = service.relay(context(), uplink(), uplink().toByteArray());
 
-        assertEquals(KeyprovReason.KEYPROV_VMD_UNAVAILABLE, result.reason());
+        assertEquals(KeyprovReason.KEYPROV_VIAM_UNAVAILABLE, result.reason());
     }
 
     @Test
-    void relay_vmdIdentityMismatchResponse_shouldKeepVmdReason() {
+    void relay_viamIdentityMismatchResponse_shouldKeepViamReason() {
         when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
-        when(vmdGateway.relay(any())).thenReturn(VmdRelayResult.rejected("req-001",
-                KeyprovReason.KEYPROV_IDENTITY_MISMATCH));
+        when(viamGateway.relay(any())).thenReturn(ViamRelayResult.rejected("req-001",
+                KeyprovReason.KEYPROV_VIAM_DEVICE_CONTEXT_MISMATCH));
 
         KeyprovRelayResult result = service.relay(context(), uplink(), uplink().toByteArray());
 
-        assertEquals(KeyprovReason.KEYPROV_IDENTITY_MISMATCH, result.reason());
+        assertEquals(KeyprovReason.KEYPROV_VIAM_DEVICE_CONTEXT_MISMATCH, result.reason());
     }
 
     @Test
     void relay_generationStale_shouldFailClosedAndNotPublish() {
         when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
-        when(vmdGateway.relay(any())).thenReturn(new VmdRelayResult("req-001", RESP_TYPE, new byte[]{1},
+        when(viamGateway.relay(any())).thenReturn(new ViamRelayResult("req-001", RESP_TYPE, new byte[]{1},
                 123L, KeyprovOutcome.SUCCESS, null, false));
         when(protocolValidator.isAllowedDownlinkPayloadType(RESP_TYPE)).thenReturn(true);
         when(sessionService.isGenerationCurrent("DEVICE001", 3L)).thenReturn(false);
@@ -327,7 +327,7 @@ class KeyprovRelayAppServiceTest {
     void relay_downlinkPublishFails_shouldFailClosed() throws Exception {
         when(contractGuard.readiness()).thenReturn(readyReadiness());
         when(inbox.record(eq("up-msg-001"), anyString())).thenReturn(KeyprovInbox.State.NEW);
-        when(vmdGateway.relay(any())).thenReturn(new VmdRelayResult("req-001", RESP_TYPE, new byte[]{1},
+        when(viamGateway.relay(any())).thenReturn(new ViamRelayResult("req-001", RESP_TYPE, new byte[]{1},
                 123L, KeyprovOutcome.SUCCESS, null, false));
         when(protocolValidator.isAllowedDownlinkPayloadType(RESP_TYPE)).thenReturn(true);
         when(sessionService.isGenerationCurrent("DEVICE001", 3L)).thenReturn(true);

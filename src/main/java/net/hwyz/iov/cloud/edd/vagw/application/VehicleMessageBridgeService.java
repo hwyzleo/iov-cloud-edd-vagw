@@ -284,7 +284,7 @@ public class VehicleMessageBridgeService {
             return moveToDlq(record, kafkaKeyVin, value, "digest_conflict");
         }
 
-        // 4. VIN → hsmUid 绑定（缓存未命中回源 TSP，EDD-VAGW-DSN-CR-007 §6.2）
+        // 4. VIN → hsmUid 绑定（缓存未命中回源 VIAM，EDD-VAGW-DSN-CR-007 §6.2（owner 由 CR-019 切换））
         //    + Envelope.device_id 一致性 + 在线会话
         BindingResolution bindingRes = bindingService.resolveByVin(kafkaKeyVin);
         if (bindingRes.status() != ResolutionStatus.RESOLVED) {

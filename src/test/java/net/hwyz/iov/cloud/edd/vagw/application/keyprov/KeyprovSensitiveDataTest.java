@@ -29,8 +29,8 @@ class KeyprovSensitiveDataTest {
     private static final String SECRET = "WRAPPED-KEY-PLAINTEXT-SECRET";
 
     @Test
-    void vmdRelayResult_toString_shouldNotLeakWrappedKeyPlaintext() {
-        VmdRelayResult result = new VmdRelayResult("req-1",
+    void viamRelayResult_toString_shouldNotLeakWrappedKeyPlaintext() {
+        ViamRelayResult result = new ViamRelayResult("req-1",
                 "security.keyprov.v1.KeyProvisioningResponse",
                 SECRET.getBytes(StandardCharsets.UTF_8), 1L,
                 KeyprovOutcome.SUCCESS, null, false);
@@ -45,7 +45,7 @@ class KeyprovSensitiveDataTest {
     }
 
     @Test
-    void vmdKeyProvisioningCommand_toString_shouldNotLeakEnvelopeOrPayloadBytes() {
+    void viamKeyProvisioningCommand_toString_shouldNotLeakEnvelopeOrPayloadBytes() {
         Envelope.VehicleMessageEnvelope envelope = Envelope.VehicleMessageEnvelope.newBuilder()
                 .setService("security.keyprov").setProtocolVersion("keyprov-v1")
                 .setMessageKind(Envelope.MessageKind.MESSAGE_KIND_REQUEST)
@@ -53,14 +53,14 @@ class KeyprovSensitiveDataTest {
                 .setPayloadType("security.keyprov.v1.KeyProvisioningRequest")
                 .setPayload(com.google.protobuf.ByteString.copyFrom(SECRET.getBytes(StandardCharsets.UTF_8)))
                 .build();
-        VmdKeyProvisioningCommand command = new VmdKeyProvisioningCommand(
+        ViamKeyProvisioningCommand command = new ViamKeyProvisioningCommand(
                 new net.hwyz.iov.cloud.edd.vagw.model.keyprov.BrokerAuthenticatedPublishContext(
                         KeyprovContextSource.ACL_SESSION_CORRELATED, "DEVICE001", "c1", null, null, 1L, "c1",
                         java.time.Instant.now()),
                 envelope, SECRET.getBytes(StandardCharsets.UTF_8));
 
         assertFalse(command.toString().contains(SECRET),
-                "VmdKeyProvisioningCommand.toString 不得输出 Envelope/payload 内容");
+                "ViamKeyProvisioningCommand.toString 不得输出 Envelope/payload 内容");
     }
 
     @Test
