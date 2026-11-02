@@ -11,6 +11,7 @@ import net.hwyz.iov.cloud.edd.vagw.service.AuthAclService;
 import net.hwyz.iov.cloud.edd.vagw.service.AuthSecurityMetrics;
 import net.hwyz.iov.cloud.edd.vagw.service.AuthenticatedIdentityStore;
 import net.hwyz.iov.cloud.edd.vagw.service.SuperuserBypassGuard;
+import net.hwyz.iov.cloud.edd.vagw.service.VagwSelfConnectionRegistry;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -43,6 +44,7 @@ public class MqttAuthController {
     private final AuthSecurityMetrics metrics;
     private final AuthenticatedIdentityStore authenticatedIdentityStore;
     private final AdmissionSessionContextRegistry admissionSessionContextRegistry;
+    private final VagwSelfConnectionRegistry vagwSelfConnectionRegistry;
 
     @PostMapping("/mqtt/auth")
     public ResponseEntity<MqttAuthResponse> authenticate(@RequestBody MqttAuthRequest request) {
@@ -52,6 +54,9 @@ public class MqttAuthController {
         if (bypassGuard.isBypassAllowed(request)) {
             log.info("VAGW self connection allowed (superuser bypass): clientId={}", request.getClientId());
             metrics.incBypassAllowed();
+            // 固化自身连接可信标记：client.connected/disconnected Hook 据此识别 VAGW 自身连接，
+            // 跳过设备上线流程与 fail-closed 断连（写失败仅告警，不阻断已建立的 bypass 信任）
+            vagwSelfConnectionRegistry.mark(request.getClientId());
             return ResponseEntity.ok(MqttAuthResponse.builder()
                     .result("allow")
                     .isSuperuser(true)

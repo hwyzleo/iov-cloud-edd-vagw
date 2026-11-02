@@ -13,6 +13,7 @@ import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttEventRequest;
 import net.hwyz.iov.cloud.edd.vagw.model.entity.SessionInfo;
 import net.hwyz.iov.cloud.edd.vagw.service.DeviceOnlineMetrics;
 import net.hwyz.iov.cloud.edd.vagw.service.SessionService;
+import net.hwyz.iov.cloud.edd.vagw.service.VagwSelfConnectionRegistry;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -40,11 +41,18 @@ public class MqttConnectionEventHandler {
     private final VagwDeviceOnlineProperties properties;
     private final DeviceOnlineMetrics metrics;
     private final EmqxClientKickClient kicker;
+    private final VagwSelfConnectionRegistry vagwSelfConnectionRegistry;
 
     /**
      * 处理 client.connected Hook。
      */
     public DeviceOnlineHookResult handleConnected(MqttEventRequest request) {
+        // VAGW 自身受信服务连接（superuser bypass）：非设备，跳过设备上线流程——
+        // 不产生 DEVICE_ONLINE、不 terminate、不 kick（否则会自踢/自断自身上行订阅）
+        if (vagwSelfConnectionRegistry.isSelfConnection(request.getClientId())) {
+            metrics.hookResult("self-connection");
+            return DeviceOnlineHookResult.SELF_CONNECTION;
+        }
         if (!properties.isEnabled()) {
             metrics.hookResult("disabled");
             return DeviceOnlineHookResult.DISABLED;

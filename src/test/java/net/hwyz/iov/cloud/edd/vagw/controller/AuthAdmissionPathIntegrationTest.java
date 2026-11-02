@@ -13,6 +13,7 @@ import net.hwyz.iov.cloud.edd.vagw.service.AuthSecurityMetrics;
 import net.hwyz.iov.cloud.edd.vagw.service.AuthenticatedIdentityStore;
 import net.hwyz.iov.cloud.edd.vagw.service.BindingService;
 import net.hwyz.iov.cloud.edd.vagw.service.SuperuserBypassGuard;
+import net.hwyz.iov.cloud.edd.vagw.service.VagwSelfConnectionRegistry;
 import net.hwyz.iov.cloud.sec.viam.api.service.ViamDeviceAdmissionService;
 import net.hwyz.iov.cloud.sec.viam.api.vo.DeviceAdmissionCheckVo;
 import net.hwyz.iov.cloud.sec.viam.api.vo.DeviceAdmissionResultVo;
@@ -60,8 +61,10 @@ class AuthAdmissionPathIntegrationTest {
     private BindingService bindingService;
     private AuthenticatedIdentityStore identityStore;
     private AdmissionSessionContextRegistry admissionContextRegistry;
+    private VagwSelfConnectionRegistry vagwSelfConnectionRegistry;
     private AuthSecurityMetrics metrics;
     private MqttAuthController controller;
+    private SuperuserBypassGuard bypassGuard;
     private String validPem;
 
     @BeforeEach
@@ -70,6 +73,7 @@ class AuthAdmissionPathIntegrationTest {
         bindingService = mock(BindingService.class);
         identityStore = mock(AuthenticatedIdentityStore.class);
         admissionContextRegistry = mock(AdmissionSessionContextRegistry.class);
+        vagwSelfConnectionRegistry = mock(VagwSelfConnectionRegistry.class);
         metrics = new AuthSecurityMetrics();
 
         VagwAdmissionProperties properties = new VagwAdmissionProperties();
@@ -77,13 +81,15 @@ class AuthAdmissionPathIntegrationTest {
         AuthAclServiceImpl service = new AuthAclServiceImpl(viam, bindingService,
                 mock(KeyprovProperties.class), mock(KeyprovContractGuard.class), factory, properties, metrics);
         SuperuserBypassGuard bypassGuard = mock(SuperuserBypassGuard.class);
+        this.bypassGuard = bypassGuard;
         when(bypassGuard.isBypassAllowed(any())).thenReturn(false);
         when(admissionContextRegistry.saveCandidate(any(), any(), any(), any(), any(), any(), any(), any(), anyLong()))
                 .thenReturn(Optional.of(new AdmissionSessionContext(DEVICE, "VIN001", EXPECTED_SERIAL,
                         CLIENT_ID, SOURCE_IP, 4, 1L, Instant.now(), Instant.now().plusSeconds(300),
                         "ADM-integration", 9L, 0L)));
 
-        controller = new MqttAuthController(service, bypassGuard, metrics, identityStore, admissionContextRegistry);
+        controller = new MqttAuthController(service, bypassGuard, metrics, identityStore, admissionContextRegistry,
+                vagwSelfConnectionRegistry);
         validPem = resource("certs/leaf-valid.pem");
     }
 
@@ -256,6 +262,24 @@ class AuthAdmissionPathIntegrationTest {
             assertFalse(key.contains(EXPECTED_SERIAL), "metric tag must not contain full serial");
             assertFalse(key.contains(DEVICE), "metric tag must not contain full identity");
         }
+    }
+
+    @Test
+    void superuserBypass_shouldMarkSelfConnectionWithoutDeviceFlow() {
+        when(bypassGuard.isBypassAllowed(any())).thenReturn(true);
+
+        MqttAuthRequest request = MqttAuthRequest.builder()
+                .clientId("vehicle-access-gatewayintegration1")
+                .build();
+
+        ResponseEntity<MqttAuthResponse> response = controller.authenticate(request);
+
+        assertEquals("allow", response.getBody().getResult());
+        assertTrue(response.getBody().getIsSuperuser());
+        verify(vagwSelfConnectionRegistry).mark("vehicle-access-gatewayintegration1");
+        verify(admissionContextRegistry, never()).saveCandidate(any(), any(), any(), any(), any(), any(), any(), any(), anyLong());
+        verify(identityStore, never()).save(any(), any(), any(), any());
+        assertTrue(viam.calls.isEmpty(), "bypass must not call VIAM");
     }
 
     private static String resource(String path) {

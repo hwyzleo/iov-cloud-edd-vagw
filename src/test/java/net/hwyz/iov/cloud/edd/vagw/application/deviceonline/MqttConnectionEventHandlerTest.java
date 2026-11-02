@@ -11,6 +11,7 @@ import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttEventRequest;
 import net.hwyz.iov.cloud.edd.vagw.model.entity.SessionInfo;
 import net.hwyz.iov.cloud.edd.vagw.service.DeviceOnlineMetrics;
 import net.hwyz.iov.cloud.edd.vagw.service.SessionService;
+import net.hwyz.iov.cloud.edd.vagw.service.VagwSelfConnectionRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,9 @@ class MqttConnectionEventHandlerTest {
     @Mock
     private EmqxClientKickClient kicker;
 
+    @Mock
+    private VagwSelfConnectionRegistry selfRegistry;
+
     private VagwDeviceOnlineProperties properties;
     private MqttConnectionEventHandler handler;
 
@@ -62,7 +66,7 @@ class MqttConnectionEventHandlerTest {
         DeviceOnlineEventFactory factory =
                 new DeviceOnlineEventFactory(new ObjectMapper().registerModule(new JavaTimeModule()));
         handler = new MqttConnectionEventHandler(registry, sessionService, outboxStore, factory,
-                properties, metrics, kicker);
+                properties, metrics, kicker, selfRegistry);
     }
 
     private MqttEventRequest request() {
@@ -167,5 +171,16 @@ class MqttConnectionEventHandlerTest {
 
         assertEquals(DeviceOnlineHookResult.DISABLED, handler.handleConnected(request()));
         verifyNoInteractions(registry, sessionService, outboxStore);
+    }
+
+    @Test
+    @DisplayName("VAGW 自身连接（bypass 标记命中）：跳过设备上线流程，不 terminate 不 kick")
+    void handleConnected_selfConnection_shouldSkipDeviceOnlineFlow() {
+        when(selfRegistry.isSelfConnection("client1")).thenReturn(true);
+
+        assertEquals(DeviceOnlineHookResult.SELF_CONNECTION, handler.handleConnected(request()));
+
+        verify(metrics).hookResult("self-connection");
+        verifyNoInteractions(registry, sessionService, outboxStore, kicker);
     }
 }

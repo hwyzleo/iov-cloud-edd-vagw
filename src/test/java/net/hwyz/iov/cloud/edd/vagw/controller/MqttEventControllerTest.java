@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import net.hwyz.iov.cloud.edd.vagw.application.deviceonline.MqttConnectionEventHandler;
 import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttEventRequest;
 import net.hwyz.iov.cloud.edd.vagw.service.SessionService;
+import net.hwyz.iov.cloud.edd.vagw.service.VagwSelfConnectionRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -28,6 +29,9 @@ class MqttEventControllerTest {
 
     @Mock
     private MqttConnectionEventHandler deviceOnlineHandler;
+
+    @Mock
+    private VagwSelfConnectionRegistry vagwSelfConnectionRegistry;
 
     @InjectMocks
     private MqttEventController controller;
@@ -61,6 +65,21 @@ class MqttEventControllerTest {
 
         assertEquals(200, response.getStatusCode().value());
         verify(sessionService).onDisconnected("DEVICE-SN-001");
+        verifyNoInteractions(deviceOnlineHandler);
+    }
+
+    @Test
+    void handleEvent_disconnected_selfConnection_shouldSkipSessionUpdate() {
+        MqttEventRequest request = new MqttEventRequest();
+        request.setEvent("client.disconnected");
+        request.setUsername("admin");
+        request.setClientId("vehicle-access-gatewayabcd1234");
+        when(vagwSelfConnectionRegistry.isSelfConnection("vehicle-access-gatewayabcd1234")).thenReturn(true);
+
+        ResponseEntity<Void> response = controller.handleEvent(request);
+
+        assertEquals(200, response.getStatusCode().value());
+        verifyNoInteractions(sessionService);
         verifyNoInteractions(deviceOnlineHandler);
     }
 

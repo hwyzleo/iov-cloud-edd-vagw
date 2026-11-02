@@ -13,6 +13,7 @@ import net.hwyz.iov.cloud.edd.vagw.model.deviceonline.DeviceOnlineHookResult;
 import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttEventRequest;
 import net.hwyz.iov.cloud.edd.vagw.service.DeviceOnlineMetrics;
 import net.hwyz.iov.cloud.edd.vagw.service.SessionService;
+import net.hwyz.iov.cloud.edd.vagw.service.VagwSelfConnectionRegistry;
 import net.hwyz.iov.cloud.framework.kafka.topic.KafkaTopicProvisioningStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -67,6 +68,9 @@ class DeviceOnlinePathIntegrationTest {
     private EmqxClientKickClient kicker;
 
     @Mock
+    private VagwSelfConnectionRegistry selfRegistry;
+
+    @Mock
     private KafkaTemplate<String, byte[]> kafkaTemplate;
 
     @Mock
@@ -93,7 +97,7 @@ class DeviceOnlinePathIntegrationTest {
         DeviceOnlineEventFactory factory =
                 new DeviceOnlineEventFactory(new ObjectMapper().registerModule(new JavaTimeModule()));
         handler = new MqttConnectionEventHandler(registry, sessionService, store, factory,
-                properties, metrics, kicker);
+                properties, metrics, kicker, selfRegistry);
         publisher = new DeviceOnlineOutboxPublisher(store, properties, kafkaTemplate,
                 provisioningStatusProvider, metrics);
         publisher.init();

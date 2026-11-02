@@ -10,6 +10,7 @@ import net.hwyz.iov.cloud.edd.vagw.service.AuthAclService;
 import net.hwyz.iov.cloud.edd.vagw.service.AuthSecurityMetrics;
 import net.hwyz.iov.cloud.edd.vagw.service.AuthenticatedIdentityStore;
 import net.hwyz.iov.cloud.edd.vagw.service.SuperuserBypassGuard;
+import net.hwyz.iov.cloud.edd.vagw.service.VagwSelfConnectionRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,6 +49,8 @@ class MqttAuthControllerTest {
     private AuthenticatedIdentityStore authenticatedIdentityStore;
     @Mock
     private AdmissionSessionContextRegistry admissionSessionContextRegistry;
+    @Mock
+    private VagwSelfConnectionRegistry vagwSelfConnectionRegistry;
 
     @InjectMocks
     private MqttAuthController controller;
@@ -117,6 +120,8 @@ class MqttAuthControllerTest {
         verify(authenticatedIdentityStore).save("client001", "DEVICE-SN-001", SERIAL, null);
         verify(admissionSessionContextRegistry).saveCandidate(
                 "DEVICE-SN-001", "VIN001", SERIAL, "client001", "10.0.0.8", 4, "ADM-mqtt-test", 7L, 5L);
+        // 设备准入路径不写自身连接标记
+        verify(vagwSelfConnectionRegistry, never()).mark(any());
     }
 
     @Test
@@ -281,5 +286,8 @@ class MqttAuthControllerTest {
         assertTrue(response.getBody().getIsSuperuser());
         verify(authAclService, never()).authenticate(any(), any(), any(), any());
         verify(metrics).incBypassAllowed();
+        // bypass 放行后固化自身连接标记，供 connected/disconnected Hook 识别
+        verify(vagwSelfConnectionRegistry).mark("vehicle-access-gatewaya1b2c3d4");
+        verify(admissionSessionContextRegistry, never()).saveCandidate(any(), any(), any(), any(), any(), any(), any(), any(), anyLong());
     }
 }

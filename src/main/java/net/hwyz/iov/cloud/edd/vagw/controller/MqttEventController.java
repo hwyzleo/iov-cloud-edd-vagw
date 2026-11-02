@@ -6,6 +6,7 @@ import net.hwyz.iov.cloud.edd.vagw.application.deviceonline.MqttConnectionEventH
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.LogMask;
 import net.hwyz.iov.cloud.edd.vagw.model.dto.MqttEventRequest;
 import net.hwyz.iov.cloud.edd.vagw.service.SessionService;
+import net.hwyz.iov.cloud.edd.vagw.service.VagwSelfConnectionRegistry;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -26,6 +27,7 @@ public class MqttEventController {
 
     private final SessionService sessionService;
     private final MqttConnectionEventHandler deviceOnlineHandler;
+    private final VagwSelfConnectionRegistry vagwSelfConnectionRegistry;
 
     @PostMapping("/mqtt/events")
     public ResponseEntity<Void> handleEvent(@RequestBody MqttEventRequest request) {
@@ -42,7 +44,12 @@ public class MqttEventController {
 
         switch (event) {
             case "client.connected" -> deviceOnlineHandler.handleConnected(request);
-            case "client.disconnected" -> sessionService.onDisconnected(deviceSn);
+            case "client.disconnected" -> {
+                // VAGW 自身受信服务连接（superuser bypass）非设备：不更新设备会话，避免误标服务账号下线
+                if (!vagwSelfConnectionRegistry.isSelfConnection(request.getClientId())) {
+                    sessionService.onDisconnected(deviceSn);
+                }
+            }
             default -> log.warn("Unknown MQTT event: {}", event);
         }
 

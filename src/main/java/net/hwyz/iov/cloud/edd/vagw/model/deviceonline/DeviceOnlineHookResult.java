@@ -3,8 +3,8 @@ package net.hwyz.iov.cloud.edd.vagw.model.deviceonline;
 /**
  * {@code client.connected} Hook 处理结果（EDD-VAGW-DSN-CR-012 §3.2/§6）。
  * <p>
- * 用于结构化观测与告警；除 {@link #ENQUEUED}/{@link #DUPLICATE} 外均表示 fail-closed，
- * 不建立可信会话、不写 Outbox。
+ * 用于结构化观测与告警；除 {@link #ENQUEUED}/{@link #DUPLICATE}/{@link #SELF_CONNECTION} 外
+ * 均表示 fail-closed，不建立可信会话、不写 Outbox。
  * </p>
  */
 public enum DeviceOnlineHookResult {
@@ -12,6 +12,8 @@ public enum DeviceOnlineHookResult {
     ENQUEUED,
     /** 同一 Hook 重试命中已有 eventId，幂等成功 */
     DUPLICATE,
+    /** VAGW 自身受信服务连接（superuser bypass），非设备：跳过设备上线流程 */
+    SELF_CONNECTION,
     /** 无准入上下文（DENY/未知/未认证/快照丢失） */
     NO_ADMISSION_CONTEXT,
     /** 准入快照过期 */
