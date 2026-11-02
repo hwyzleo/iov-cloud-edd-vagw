@@ -112,16 +112,13 @@ vagw:
   # 缓存有界 TTL，未命中回源 VIAM；不做长期负缓存（negative-cache-ttl 恒为 0）
   binding:
     cache-ttl-seconds: 300
-  # VAGW → VIAM 服务间签名认证（SEC-VIAM-DSN-CR-001 / G-4，EDD-VAGW-DSN-CR-019 配套）：
-  # VIAM /api/service/** 强制 HMAC-SHA256 验签（fail-closed）；Secret 经环境变量注入（Base64，
-  # 禁止 Nacos/日志）；keyId 与 VIAM secrets.<clientId>.<keyId> 对应；audience 固定 sec-viam。
+  # VAGW → VIAM 服务身份（SEC-VIAM-DSN-CR-001 / R1，G-4 平台内网信任链）：
+  # /api/service/** 由 VIAM 强制 X-Client-Id 身份映射与接口授权；VAGW 经 Feign 注入
+  # X-Client-Id=VAGW（ViamServiceClientIdInterceptor，仅 SEC_VIAM 作用域）。无 HMAC Secret。
   security:
-    viam-service-identity:
-      enabled: ${VAGW_VIAM_SERVICE_IDENTITY_ENABLED:true}
+    viam-client-id:
+      # 平台内网调用方服务身份（与 VIAM ServiceAccessPolicy 登记一致）
       client-id: ${VAGW_VIAM_SERVICE_CLIENT_ID:VAGW}
-      key-id: ${VAGW_VIAM_SERVICE_KEY_ID:k1}
-      secret: ${VAGW_VIAM_SERVICE_SECRET:}
-      audience: ${VAGW_VIAM_SERVICE_AUDIENCE:sec-viam}
   # 访问失效消费（SEC-VIAM-DSN-CR-001 / FR-VIAM-008 / G-3，EDD-VAGW-DSN-CR-019 配套）：
   # 消费 viam.access-invalidated（VIAM 生产，VAGW 消费）；按安全版本/generation 判定执行失效/断连，
   # 并以 ViamAccessInvalidationService.receipt() 回执区分状态。
