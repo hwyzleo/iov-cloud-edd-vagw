@@ -99,6 +99,14 @@ class VehicleEnvelopeValidatorTest {
     }
 
     @Test
+    void validateUplink_missingVin_shouldFailContractInvalid() {
+        // 下游以 Kafka Key(VIN)＝Envelope.vin 为硬契约，空 VIN 必须在入口 fail-closed
+        Envelope.VehicleMessageEnvelope e = base("m-011").clearVin().build();
+        assertEquals(VehicleEnvelopeValidator.Reason.CONTRACT_INVALID,
+                validator.validateUplink(e, e.toByteArray()).reason());
+    }
+
+    @Test
     void validateDownlink_vinMismatch_shouldFailDeviceMismatch() {
         Envelope.VehicleMessageEnvelope e = base("m-008").build();
         assertEquals(VehicleEnvelopeValidator.Reason.DEVICE_MISMATCH,

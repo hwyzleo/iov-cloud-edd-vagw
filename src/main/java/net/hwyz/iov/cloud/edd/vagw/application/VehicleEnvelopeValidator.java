@@ -80,10 +80,22 @@ public class VehicleEnvelopeValidator {
     }
 
     /**
-     * 上行校验：公共校验 + 身份由 AccessIdentityValidator 单独校验。
+     * 上行校验：公共校验 + Envelope.vin 必填（身份由 AccessIdentityValidator 单独校验）。
+     *
+     * <p>上行 Kafka value 原样转发 MQTT 收到的 Envelope bytes 且不补写 VIN（§4.5），
+     * 下游 IOV-OTA 要求 Kafka Key(VIN)＝Envelope.vin；因此 Envelope.vin 为空时
+     * 必然会被下游判为不可恢复契约错误。VAGW 必须在入口 fail-closed，
+     * 按契约错误进入上行 DLQ，不得桥接一条注定被判死的消息。
      */
     public Failure validateUplink(Envelope.VehicleMessageEnvelope envelope, byte[] envelopeBytes) {
-        return validateBase(envelope, envelopeBytes);
+        Failure base = validateBase(envelope, envelopeBytes);
+        if (base != null) {
+            return base;
+        }
+        if (isBlank(envelope.getVin())) {
+            return new Failure(Reason.CONTRACT_INVALID, "uplink missing vin in envelope");
+        }
+        return null;
     }
 
     /**

@@ -127,7 +127,19 @@ public class VehicleMessageBridgeService {
             return UplinkResult.fail(ec, "binding " + dlqReason);
         }
         String vin = bindingRes.binding().getVin();
-        if (!envelope.getVin().isBlank() && !envelope.getVin().equalsIgnoreCase(vin)) {
+        // EDD-VAGW-DSN-CR-006 §9.3/§4.5：当前绑定 VIN＝Envelope.vin，且不补写 VIN。
+        // 空 VIN 或与绑定不一致都不得桥接：上游 bytes 原样转发，下游 IOV-OTA 以
+        // Kafka Key(VIN)＝Envelope.vin 为硬契约，不一致必然被判为不可恢复契约错误。
+        if (envelope.getVin().isBlank()) {
+            log.warn("FOTA uplink rejected: envelope missing vin, deviceId={}",
+                    LogMask.mask(envelope.getDeviceId()));
+            moveToDlqBestEffort(routeCatalog.upDlqTopic(), topicDeviceKey, envelopeBytes,
+                    "envelope_vin_missing");
+            recordUplinkFinal(envelope, envelopeBytes, VehicleBridgeInbox.State.DLQED,
+                    "CONTRACT_INVALID", null, null);
+            return UplinkResult.fail(ErrorCode.INVALID_ENVELOPE, "envelope missing vin");
+        }
+        if (!envelope.getVin().equalsIgnoreCase(vin)) {
             log.warn("FOTA uplink rejected: envelope vin mismatch binding, deviceId={}",
                     LogMask.mask(envelope.getDeviceId()));
             moveToDlqBestEffort(routeCatalog.upDlqTopic(), topicDeviceKey, envelopeBytes,

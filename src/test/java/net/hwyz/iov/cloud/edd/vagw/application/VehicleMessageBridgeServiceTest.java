@@ -226,6 +226,24 @@ class VehicleMessageBridgeServiceTest {
     }
 
     @Test
+    void processUplink_envelopeVinMissing_shouldMoveToUpDlq() {
+        // 下游 IOV-OTA 以 Kafka Key(VIN)＝Envelope.vin 为硬契约；空 VIN 不得桥接
+        Envelope.VehicleMessageEnvelope e = uplinkBase().clearVin().build();
+        when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
+        when(accessIdentityValidator.validate(any(), any())).thenReturn(null);
+        when(bindingService.resolveByHsmUid("DEVICE001")).thenReturn(resolvedBinding("VIN-A", "DEVICE001"));
+
+        VehicleMessageBridgeService.UplinkResult result =
+                bridgeService.processUplink(e.toByteArray(), "DEVICE001");
+
+        assertFalse(result.ok());
+        assertEquals(ErrorCode.INVALID_ENVELOPE, result.errorCode());
+        verify(dlqPublisher).publish(eq(routeCatalog.upDlqTopic()), eq("DEVICE001"),
+                any(byte[].class), contains("envelope_vin_missing"));
+        verifyNoInteractions(kafkaProducer);
+    }
+
+    @Test
     void processUplink_duplicateSameHash_shouldSkip() {
         Envelope.VehicleMessageEnvelope e = uplinkBase().build();
         byte[] bytes = e.toByteArray();
