@@ -131,8 +131,8 @@ public class VehicleMessageBridgeService {
         // 空 VIN 或与绑定不一致都不得桥接：上游 bytes 原样转发，下游 IOV-OTA 以
         // Kafka Key(VIN)＝Envelope.vin 为硬契约，不一致必然被判为不可恢复契约错误。
         if (envelope.getVin().isBlank()) {
-            log.warn("FOTA uplink rejected: envelope missing vin, deviceId={}",
-                    LogMask.mask(envelope.getDeviceId()));
+            log.warn("FOTA uplink rejected: envelope missing vin, deviceId={}, messageId={}",
+                    LogMask.mask(envelope.getDeviceId()), envelope.getMessageId());
             moveToDlqBestEffort(routeCatalog.upDlqTopic(), topicDeviceKey, envelopeBytes,
                     "envelope_vin_missing");
             recordUplinkFinal(envelope, envelopeBytes, VehicleBridgeInbox.State.DLQED,
@@ -140,8 +140,11 @@ public class VehicleMessageBridgeService {
             return UplinkResult.fail(ErrorCode.INVALID_ENVELOPE, "envelope missing vin");
         }
         if (!envelope.getVin().equalsIgnoreCase(vin)) {
-            log.warn("FOTA uplink rejected: envelope vin mismatch binding, deviceId={}",
-                    LogMask.mask(envelope.getDeviceId()));
+            log.warn("FOTA uplink rejected: envelope vin mismatch binding, deviceId={}, "
+                            + "envelopeVin={}, boundVin={}, messageId={}, payloadType={}",
+                    LogMask.mask(envelope.getDeviceId()), LogMask.mask(envelope.getVin()),
+                    LogMask.mask(vin), envelope.getMessageId(),
+                    LogMask.maskPayloadType(envelope.getPayloadType()));
             moveToDlqBestEffort(routeCatalog.upDlqTopic(), topicDeviceKey, envelopeBytes,
                     "vin_mismatch_binding");
             recordUplinkFinal(envelope, envelopeBytes, VehicleBridgeInbox.State.DLQED,
