@@ -87,7 +87,7 @@ class VagwJacksonTimeContractTest {
         return runner;
     }
 
-    // ---------- 兼容阶段写出：epoch-millis（13 位） ----------
+    // ---------- 写出模式：默认 ISO（时间契约已统一为 ISO） ----------
 
     @Test
     @DisplayName("epoch-millis 模式 + 显式 zone：Instant 输出 13 位 epoch 毫秒")
@@ -101,8 +101,8 @@ class VagwJacksonTimeContractTest {
     }
 
     @Test
-    @DisplayName("DeviceOnlineEvent 载荷：occurredAt 输出 13 位 epoch 毫秒（新建事件契约）")
-    void deviceOnlineEvent_occurredAtWrites13DigitMillis() {
+    @DisplayName("DeviceOnlineEvent 载荷：occurredAt 输出 ISO 毫秒字符串（默认 ISO 时间契约）")
+    void deviceOnlineEvent_occurredAtWritesIsoString() {
         runner("iov.web.jackson.zone-id=Asia/Shanghai")
                 .run(context -> {
                     ObjectMapper mapper = context.getBean(ObjectMapper.class);
@@ -113,8 +113,8 @@ class VagwJacksonTimeContractTest {
                             "evt-1", DeviceOnlineEvent.TYPE, "DEVICE-1", "VIN1", "sess-1",
                             12L, "CERT", null, SAMPLE, DeviceOnlineEvent.TIME_SOURCE_EMQX, null, null, null, null, null);
                     String json = factory.toJson(event);
-                    assertThat(json).contains("\"occurredAt\":" + SAMPLE.toEpochMilli());
-                    assertThat(json).doesNotContain("\"occurredAt\":\"");
+                    assertThat(json).contains("\"occurredAt\":\"" + SAMPLE + "\"");
+                    assertThat(json).doesNotContain("\"occurredAt\":" + SAMPLE.toEpochMilli());
                 });
     }
 
@@ -183,8 +183,8 @@ class VagwJacksonTimeContractTest {
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     ObjectMapper mapper = context.getBean(ObjectMapper.class);
-                    // 框架策略仍生效：Instant 输出 epoch 毫秒数字
-                    assertThat(mapper.writeValueAsString(SAMPLE)).isEqualTo(String.valueOf(SAMPLE.toEpochMilli()));
+                    // 框架策略仍生效：Instant 输出 ISO 毫秒字符串（默认 ISO）
+                    assertThat(mapper.writeValueAsString(SAMPLE)).isEqualTo("\"" + SAMPLE + "\"");
                     // 服务定制保留：String 自定义序列化器（后注册覆盖）
                     assertThat(mapper.writeValueAsString("hello")).isEqualTo("\"SVC:hello\"");
                 });

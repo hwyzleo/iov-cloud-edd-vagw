@@ -16,6 +16,7 @@ import net.hwyz.iov.cloud.edd.vagw.service.SessionService;
 import net.hwyz.iov.cloud.edd.vagw.service.VagwMqttSubscriptionMetrics;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -125,7 +126,7 @@ class VehicleMessageBridgeServiceTest {
         byte[] bytes = e.toByteArray();
         when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
         when(accessIdentityValidator.validate(eq("DEVICE001"), eq("DEVICE001"))).thenReturn(null);
-        when(bindingService.resolveByHsmUid("DEVICE001")).thenReturn(resolvedBinding("VIN-A", "DEVICE001"));
+        when(bindingService.resolveForUplink("DEVICE001", "VIN-A")).thenReturn(resolvedBinding("VIN-A", "DEVICE001"));
         when(bridgeInbox.findFinal(VehicleBridgeInbox.Direction.UPLINK, "msg-up-001"))
                 .thenReturn(Optional.empty());
         when(kafkaProducer.sendUplink(any(), any(), any(), any(), any()))
@@ -178,7 +179,7 @@ class VehicleMessageBridgeServiceTest {
         Envelope.VehicleMessageEnvelope e = uplinkBase().build();
         when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
         when(accessIdentityValidator.validate(any(), any())).thenReturn(null);
-        when(bindingService.resolveByHsmUid("DEVICE001"))
+        when(bindingService.resolveForUplink("DEVICE001", "VIN-A"))
                 .thenReturn(BindingResolution.contextMissing("no session binding"));
 
         VehicleMessageBridgeService.UplinkResult result =
@@ -196,7 +197,7 @@ class VehicleMessageBridgeServiceTest {
         Envelope.VehicleMessageEnvelope e = uplinkBase().build();
         when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
         when(accessIdentityValidator.validate(any(), any())).thenReturn(null);
-        when(bindingService.resolveByHsmUid("DEVICE001"))
+        when(bindingService.resolveForUplink("DEVICE001", "VIN-A"))
                 .thenReturn(BindingResolution.dependencyUnavailable("DEPENDENCY_UNAVAILABLE"));
 
         VehicleMessageBridgeService.UplinkResult result =
@@ -214,7 +215,7 @@ class VehicleMessageBridgeServiceTest {
         Envelope.VehicleMessageEnvelope e = uplinkBase().setVin("VIN-B").build();
         when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
         when(accessIdentityValidator.validate(any(), any())).thenReturn(null);
-        when(bindingService.resolveByHsmUid("DEVICE001")).thenReturn(resolvedBinding("VIN-A", "DEVICE001"));
+        when(bindingService.resolveForUplink("DEVICE001", "VIN-B")).thenReturn(resolvedBinding("VIN-A", "DEVICE001"));
 
         VehicleMessageBridgeService.UplinkResult result =
                 bridgeService.processUplink(e.toByteArray(), "DEVICE001");
@@ -231,7 +232,6 @@ class VehicleMessageBridgeServiceTest {
         Envelope.VehicleMessageEnvelope e = uplinkBase().clearVin().build();
         when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
         when(accessIdentityValidator.validate(any(), any())).thenReturn(null);
-        when(bindingService.resolveByHsmUid("DEVICE001")).thenReturn(resolvedBinding("VIN-A", "DEVICE001"));
 
         VehicleMessageBridgeService.UplinkResult result =
                 bridgeService.processUplink(e.toByteArray(), "DEVICE001");
@@ -240,7 +240,7 @@ class VehicleMessageBridgeServiceTest {
         assertEquals(ErrorCode.INVALID_ENVELOPE, result.errorCode());
         verify(dlqPublisher).publish(eq(routeCatalog.upDlqTopic()), eq("DEVICE001"),
                 any(byte[].class), contains("envelope_vin_missing"));
-        verifyNoInteractions(kafkaProducer);
+        verifyNoInteractions(kafkaProducer, bindingService);
     }
 
     @Test
@@ -249,7 +249,7 @@ class VehicleMessageBridgeServiceTest {
         byte[] bytes = e.toByteArray();
         when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
         when(accessIdentityValidator.validate(any(), any())).thenReturn(null);
-        when(bindingService.resolveByHsmUid("DEVICE001")).thenReturn(resolvedBinding("VIN-A", "DEVICE001"));
+        when(bindingService.resolveForUplink("DEVICE001", "VIN-A")).thenReturn(resolvedBinding("VIN-A", "DEVICE001"));
         String digest = VehicleBridgeInbox.digestOf(bytes);
         when(bridgeInbox.findFinal(VehicleBridgeInbox.Direction.UPLINK, "msg-up-001"))
                 .thenReturn(Optional.of(VehicleBridgeInbox.InboxRecord.builder()
@@ -267,7 +267,7 @@ class VehicleMessageBridgeServiceTest {
         Envelope.VehicleMessageEnvelope e = uplinkBase().build();
         when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
         when(accessIdentityValidator.validate(any(), any())).thenReturn(null);
-        when(bindingService.resolveByHsmUid("DEVICE001")).thenReturn(resolvedBinding("VIN-A", "DEVICE001"));
+        when(bindingService.resolveForUplink("DEVICE001", "VIN-A")).thenReturn(resolvedBinding("VIN-A", "DEVICE001"));
         when(bridgeInbox.findFinal(VehicleBridgeInbox.Direction.UPLINK, "msg-up-001"))
                 .thenReturn(Optional.empty());
         when(kafkaProducer.sendUplink(any(), any(), any(), any(), any()))
@@ -496,6 +496,51 @@ class VehicleMessageBridgeServiceTest {
         assertTrue(processed);
         verify(gatewayDeliveryService).produceRejected(e, vin, DeliveryReason.MQTT_PUBLISH_FAILED);
         verify(bridgeInbox).recordFinal(argThat(r -> "REJECTED".equals(r.getState())));
+    }
+
+    @Test
+    @DisplayName("CR-020：TTL 到期后上行自愈（清单上报与其它 fota 上行等价，不按类型豁免）")
+    void processUplink_manifestAfterCacheTtlExpiry_shouldSelfHealAndBridge() throws Exception {
+        Envelope.VehicleMessageEnvelope e = uplinkBase()
+                .setPayloadType("vehicle.fota.v1.ManifestReport")
+                .build();
+        byte[] bytes = e.toByteArray();
+        when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
+        when(accessIdentityValidator.validate(eq("DEVICE001"), eq("DEVICE001"))).thenReturn(null);
+        // 缓存已过期（resolveForUplink 内部回源成功，返回绑定）
+        when(bindingService.resolveForUplink("DEVICE001", "VIN-A"))
+                .thenReturn(resolvedBinding("VIN-A", "DEVICE001"));
+        when(bridgeInbox.findFinal(VehicleBridgeInbox.Direction.UPLINK, "msg-up-001"))
+                .thenReturn(Optional.empty());
+        when(kafkaProducer.sendUplink(any(), any(), any(), any(), any()))
+                .thenReturn(new EnvelopeKafkaProducer.SendResult(0, 11));
+
+        VehicleMessageBridgeService.UplinkResult result =
+                bridgeService.processUplink(bytes, "DEVICE001");
+
+        assertTrue(result.ok());
+        verify(kafkaProducer).sendUplink(eq(routeCatalog.kafkaUpTopic()), eq("VIN-A"),
+                eq(bytes), any(), any());
+        verify(dlqPublisher, never()).publish(anyString(), anyString(), any(), any());
+    }
+
+    @Test
+    @DisplayName("CR-020：VIN 已改绑（回源身份不一致）→ binding_conflict 进上行 DLQ，不产生 Kafka 结果")
+    void processUplink_bindingConflict_shouldMoveToUpDlq() throws Exception {
+        Envelope.VehicleMessageEnvelope e = uplinkBase().build();
+        when(envelopeValidator.validateUplink(any(), any())).thenReturn(null);
+        when(accessIdentityValidator.validate(any(), any())).thenReturn(null);
+        when(bindingService.resolveForUplink("DEVICE001", "VIN-A"))
+                .thenReturn(BindingResolution.conflict());
+
+        VehicleMessageBridgeService.UplinkResult result =
+                bridgeService.processUplink(e.toByteArray(), "DEVICE001");
+
+        assertFalse(result.ok());
+        assertEquals(ErrorCode.BINDING_CONFLICT, result.errorCode());
+        verify(dlqPublisher).publish(eq(routeCatalog.upDlqTopic()), eq("DEVICE001"),
+                any(byte[].class), contains("binding_conflict"));
+        verifyNoInteractions(kafkaProducer);
     }
 
     @Test

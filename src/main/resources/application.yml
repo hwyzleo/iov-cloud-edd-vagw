@@ -108,10 +108,27 @@ vagw:
       retry-on-read-timeout: false
     emqx-auth:
       required-timeout: 2s  # EMQX → VAGW HTTP authn 回调预算（部署前置）
-  # 绑定解析配置（EDD-VAGW-DSN-CR-007 §8，owner 由 EDD-VAGW-DSN-CR-019 切换 VIAM）：
-  # 缓存有界 TTL，未命中回源 VIAM；不做长期负缓存（negative-cache-ttl 恒为 0）
+  # 绑定解析配置（EDD-VAGW-DSN-CR-007 §8，owner 由 EDD-VAGW-DSN-CR-019 切换 VIAM；
+  # TTL 语义由 EDD-VAGW-DSN-CR-020 §5/§6 收敛）：
+  # cache-ttl-seconds 只是加速层陈旧上限，不再是映射业务可用期；hsmUid→VIN 上行未命中必回源 VIAM，
+  # 因此 TTL 到期不再导致上行被拒。session-max-ttl-seconds 是单会话内映射最长有效期（滑动续期封顶），
+  # 须 >= cache-ttl 且 <= 会话记录 TTL(24h)，非法即启动失败。
   binding:
     cache-ttl-seconds: 300
+    session-max-ttl-seconds: 1800
+    # A：上行缓存未命中回源（单飞 + 有界并发 + 独立 deadline）。deadline-ms 需覆盖 VIAM
+    # identity Feign connect(500)+read(500) 的最坏情况，超出即依赖不可用并进 DLQ。
+    # enabled=false 仅限非生产排障，启动会 WARN 告警。
+    uplink-resolve:
+      enabled: true
+      deadline-ms: 500
+      max-concurrent: 8
+      single-flight: true
+    # B：会话期续期与断连清理（命中滑动续期受 session-max-ttl 封顶；仅对已存在 key 生效）
+    session-renew:
+      enabled: true
+      renew-on-hit: true
+      clean-on-disconnect: true
   # VAGW → VIAM 服务身份（SEC-VIAM-DSN-CR-001 / R1，G-4 平台内网信任链）：
   # /api/service/** 由 VIAM 强制 X-Client-Id 身份映射与接口授权；VAGW 经 Feign 注入
   # X-Client-Id=VAGW（ViamServiceClientIdInterceptor，仅 SEC_VIAM 作用域）。无 HMAC Secret。

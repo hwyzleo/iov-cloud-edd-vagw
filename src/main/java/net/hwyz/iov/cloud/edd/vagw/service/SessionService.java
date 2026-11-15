@@ -18,7 +18,8 @@ public class SessionService {
 
     private static final String SESSION_KEY_PREFIX = "vagw:session:";
     private static final String SESSION_GENERATION_KEY_PREFIX = "vagw:session:gen:";
-    private static final long SESSION_TTL_HOURS = 24;
+    /** 会话记录 TTL；单会话绑定映射上限不得超出该值（EDD-VAGW-DSN-CR-020 §6 启动校验） */
+    public static final long SESSION_TTL_HOURS = 24;
 
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
@@ -136,6 +137,10 @@ public class SessionService {
 
                 log.info("Session offline: deviceUid={}", deviceSn);
             }
+            // 可信断连清理会话级 hsmUid→VIN 映射（EDD-VAGW-DSN-CR-020 §4.4）：
+            // 只清 hsm 方向，VIN 方向保留供下行解析；开关与异常处理在 BindingService 内收敛，
+            // 清理失败不得阻塞会话状态更新。
+            bindingService.clearSessionMapping(deviceSn);
         } catch (Exception e) {
             log.error("Failed to update session disconnect for deviceSn={}", deviceSn, e);
         }

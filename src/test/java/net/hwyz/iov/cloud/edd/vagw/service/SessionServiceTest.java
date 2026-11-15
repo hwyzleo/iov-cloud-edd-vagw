@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import net.hwyz.iov.cloud.edd.vagw.model.entity.SessionInfo;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -176,6 +177,30 @@ class SessionServiceTest {
 
         assertTrue(sessionService.isGenerationCurrent("DEVICE001", 7));
         assertFalse(sessionService.isGenerationCurrent("DEVICE001", 6));
+    }
+
+    @Test
+    @DisplayName("断连：清理会话级 hsmUid→VIN 映射（EDD-VAGW-DSN-CR-020 §4.4）")
+    void onDisconnected_shouldClearSessionBindingMapping() throws Exception {
+        String json = "{\"deviceSn\":\"DEVICE001\",\"vin\":\"VIN001\",\"clientId\":\"client001\",\"online\":true}";
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get("vagw:session:DEVICE001")).thenReturn(json);
+
+        sessionService.onDisconnected("DEVICE001");
+
+        verify(bindingService).clearSessionMapping("DEVICE001");
+        verify(valueOperations).set(eq("vagw:session:DEVICE001"), anyString(), eq(24L), eq(TimeUnit.HOURS));
+    }
+
+    @Test
+    @DisplayName("断连：无会话记录也必须清理会话级映射（幂等）")
+    void onDisconnected_withoutSession_shouldStillClearMapping() {
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get("vagw:session:DEVICE001")).thenReturn(null);
+
+        sessionService.onDisconnected("DEVICE001");
+
+        verify(bindingService).clearSessionMapping("DEVICE001");
     }
 
     @Test

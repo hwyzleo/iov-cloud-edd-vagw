@@ -6,6 +6,7 @@ import net.hwyz.iov.cloud.edd.vagw.config.VagwKafkaTopicProvisioningProperties;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.kafka.VagwDeviceOnlineTopicDefinitionProvider;
 import net.hwyz.iov.cloud.edd.vagw.infrastructure.kafka.VagwFotaTopicDefinitionProvider;
 import net.hwyz.iov.cloud.framework.kafka.autoconfigure.KafkaTopicProvisioningAutoConfiguration;
+import net.hwyz.iov.cloud.framework.kafka.autoconfigure.KafkaTopicProvisioningStatusAutoConfiguration;
 import org.apache.kafka.clients.admin.Admin;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.springframework.boot.autoconfigure.ImportAutoConfiguration;
@@ -32,6 +33,10 @@ import org.springframework.context.annotation.Bean;
 })
 @ImportAutoConfiguration({
         KafkaAutoConfiguration.class,
+        // 框架将 ProvisioningStatus 拆分为独立 AutoConfiguration（默认 NOT_READY → READY 状态机），
+        // 只导入 KafkaTopicProvisioningAutoConfiguration 会缺少 DefaultKafkaTopicProvisioningStatus
+        // 导致上下文启动失败；两者必须成对装配。
+        KafkaTopicProvisioningStatusAutoConfiguration.class,
         KafkaTopicProvisioningAutoConfiguration.class
 })
 public class VagwKafkaProvisioningTestConfig {
