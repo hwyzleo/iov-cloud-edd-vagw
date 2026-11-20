@@ -5,6 +5,8 @@ vehicle.fota.v1.ControlAckResponse
 vehicle.fota.v1.ControlCommand
 vehicle.fota.v1.DownloadGrantRequest
 vehicle.fota.v1.DownloadGrantResponse
+vehicle.fota.v1.DownloadProgressReport
+vehicle.fota.v1.DownloadProgressResponse
 vehicle.fota.v1.EventResponse
 vehicle.fota.v1.ExecutionEvent
 vehicle.fota.v1.FinalResultReport

@@ -4,7 +4,7 @@
   "common": {
     "coordinates": "net.hwyz.iov.cloud.proto:proto-vehicle-common:0.0.1-SNAPSHOT",
     "descriptorSha256": "4ba4c1470270b16a44f30ce3bfff2062a703c0c88ac56bf89925a810651bc200",
-    "payloadTypeRegistrySha256": "33725f887e0987fbc0e3c6a81f58c7a591435f226b23e8adf97ae9902992d4ec"
+    "payloadTypeRegistrySha256": "f6cd136198a182a9035727d87aad6676756d6f04ba63135033e564b271f0b862"
   },
   "protoVagw": {
     "coordinates": "net.hwyz.iov.cloud.proto:proto-vagw:0.0.1-SNAPSHOT",
